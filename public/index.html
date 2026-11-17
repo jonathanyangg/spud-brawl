@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Spud Brawl</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🥔</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Rubik:wght@400;500;700;800&display=swap">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script type="module" src="game.js"></script>
+</head>
+<body>
+<div id="app">
+  <div id="game"></div>
+
+  <div class="hud" id="hud" hidden>
+    <div id="hurt"></div>
+    <div id="scope" hidden></div>
+    <div id="dmgdir"><span></span></div>
+    <div id="scoretop">
+      <div class="chip you"><small>You</small><span id="sYou">0</span></div>
+      <div class="chip"><small>Top rival</small><span id="sLead">-</span></div>
+      <div class="chip"><small>To win</small><span id="sGoal">20</span></div>
+    </div>
+    <div id="netStatus" hidden></div>
+    <ul id="feed"></ul>
+    <div id="cross"><i></i><i></i><i></i><i></i><b></b></div>
+    <svg id="hitm" viewBox="0 0 30 30" aria-hidden="true"><g stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="3" y1="3" x2="10" y2="10"/><line x1="27" y1="3" x2="20" y2="10"/><line x1="3" y1="27" x2="10" y2="20"/><line x1="27" y1="27" x2="20" y2="20"/></g></svg>
+    <div id="reloadTxt" hidden>Reloading</div>
+    <div id="toast"></div>
+    <div id="hpbox" class="panel">
+      <div class="lbl">Health</div>
+      <div id="hpnum">100</div>
+      <div class="bar"><div id="hpbar"></div></div>
+    </div>
+    <div id="wbox" class="panel">
+      <div id="wname">Peeler</div>
+      <div id="ammo">30 <small>/ 30</small></div>
+      <div id="slots"><span>1 Peeler</span><span>2 Masher</span><span>3 Fry-Rifle</span></div>
+      <div id="nade">Hot Potato ready</div>
+    </div>
+  </div>
+
+  <div class="overlay" id="menu">
+    <div class="menu-inner">
+      <h1 class="title">Spud<br>Brawl</h1>
+      <p class="tag">A free-for-all potato shootout in the market yard. Peel, mash and fry your way to 20 knockouts before the other spuds do.</p>
+      <div class="form">
+        <div class="row">
+          <label for="nameIn">Your spud's name</label>
+          <input type="text" id="nameIn" maxlength="16" value="Couch Potato" autocomplete="off">
+        </div>
+        <div class="row">
+          <div class="lbl" id="modeLbl">Mode</div>
+          <div class="seg" id="modeSeg" role="group" aria-labelledby="modeLbl">
+            <button type="button" id="mBots" data-v="bots" aria-pressed="true">Vs bots</button>
+            <button type="button" id="mOnline" data-v="online" aria-pressed="false">Online with friends</button>
+          </div>
+        </div>
+        <div id="botRows" class="form">
+        <div class="row">
+          <div class="lbl" id="diffLbl">Bot skill</div>
+          <div class="seg" id="diffSeg" role="group" aria-labelledby="diffLbl">
+            <button type="button" id="dEasy" data-v="easy" aria-pressed="false">Easy</button>
+            <button type="button" id="dNormal" data-v="normal" aria-pressed="true">Normal</button>
+            <button type="button" id="dHard" data-v="hard" aria-pressed="false">Hard</button>
+          </div>
+        </div>
+        <div class="row">
+          <div class="lbl" id="botLbl">Bots</div>
+          <div class="seg" id="botSeg" role="group" aria-labelledby="botLbl">
+            <button type="button" id="b3" data-v="3" aria-pressed="false">3</button>
+            <button type="button" id="b5" data-v="5" aria-pressed="true">5</button>
+            <button type="button" id="b7" data-v="7" aria-pressed="false">7</button>
+          </div>
+        </div>
+        </div>
+        <div id="roomRows" class="form" hidden>
+          <div class="row">
+            <label for="roomIn">Room code</label>
+            <input type="text" id="roomIn" maxlength="20" value="brawl" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="invite" id="inviteRow">
+            <button class="btn ghost small" id="inviteBtn" type="button">Copy invite link</button>
+            <input type="text" id="inviteOut" readonly aria-label="Invite link" hidden>
+          </div>
+          <p class="help" id="inviteMsg" aria-live="polite" hidden></p>
+          <p class="help" id="onlineHelp">Everyone types the same room code, or opens your invite link, and presses Join room.</p>
+        </div>
+        <div class="row">
+          <label for="sensIn">Mouse sensitivity <span id="sensVal">1.0</span></label>
+          <input type="range" id="sensIn" min="0.3" max="2.5" step="0.1" value="1">
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn" id="playBtn" type="button">Play</button>
+        <button class="btn ghost" id="ctrlBtn" type="button">Controls</button>
+      </div>
+      <p class="note" id="touchNote" hidden>Spud Brawl needs a keyboard and mouse. On this device you can watch the bots brawl.</p>
+      <div class="keys" id="keyHelp"></div>
+    </div>
+  </div>
+
+  <div class="overlay" id="pause" hidden>
+    <div class="card">
+      <h2>Paused</h2>
+      <p id="pauseMsg">Click Resume to grab the mouse again.</p>
+      <div class="actions" style="justify-content:center">
+        <button class="btn" id="resumeBtn" type="button">Resume</button>
+        <button class="btn ghost" id="pCtrlBtn" type="button">Controls</button>
+        <button class="btn ghost" id="pInviteBtn" type="button" hidden>Copy invite link</button>
+        <button class="btn ghost" id="quitBtn" type="button">Quit to menu</button>
+      </div>
+      <input type="text" id="pInviteOut" readonly aria-label="Invite link" hidden>
+    </div>
+  </div>
+
+  <div class="overlay" id="controls" hidden>
+    <div class="card" role="dialog" aria-modal="true" aria-labelledby="ctrlTitle">
+      <h2 id="ctrlTitle">Controls</h2>
+      <p class="help">Click a control, then press the key or mouse button you want for it. Taking a key that's already in use swaps the two.</p>
+      <div id="bindList"></div>
+      <p class="help" id="bindMsg" aria-live="polite"></p>
+      <div class="actions">
+        <button class="btn" id="ctrlDone" type="button">Done</button>
+        <button class="btn ghost" id="ctrlReset" type="button">Reset to defaults</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="death" hidden>
+    <div class="card">
+      <p class="lbl">Knocked out</p>
+      <h2 id="deathBy">Mashed by Russet</h2>
+      <p id="deathHow"></p>
+      <p id="deathCount">Back in 4</p>
+    </div>
+  </div>
+
+  <div class="overlay" id="board" hidden>
+    <div class="card"><h2 style="font-size:24px">Scores</h2><table id="boardTbl"></table></div>
+  </div>
+
+  <div class="overlay" id="over" hidden>
+    <div class="card">
+      <p class="lbl">Match over</p>
+      <h2 id="overTitle">You win</h2>
+      <table id="overTbl"></table>
+      <div class="actions" style="justify-content:center">
+        <button class="btn" id="againBtn" type="button">Play again</button>
+        <button class="btn ghost" id="menuBtn" type="button">Main menu</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
