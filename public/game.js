@@ -1086,10 +1086,15 @@ function setState(s) {
   if (s !== 'playing') { for (const k in keys) keys[k] = false; $('board').hidden = true; }
   if (s === 'playing' || s === 'over') { $('controls').hidden = true; rebinding = null; }
   if (s === 'paused') { $('pInviteBtn').hidden = mode !== 'online'; $('pInviteOut').hidden = true; }
-  if (s === 'paused') $('pauseMsg').textContent = plWorks === false ? 'Press Resume when you are ready.' : 'Click Resume to grab the mouse again.';
+  if (s === 'paused') {
+    $('pauseTitle').textContent = 'Paused'; $('resumeBtn').textContent = 'Resume';
+    $('pauseMsg').textContent = plWorks === false ? 'Press Resume when you are ready.' : 'Click Resume to grab the mouse again.';
+  }
   if (s === 'menu' || s === 'over') { $('death').hidden = true; if (document.pointerLockElement) document.exitPointerLock(); }
 }
-function startGame() {
+// fromLink: joined by opening an invite link. Browsers only grab the mouse after a click,
+// so we join the room right away and wait on one "Play" click.
+function startGame(fromLink = false) {
   settings.name = cleanName($('nameIn').value) || 'Couch Potato';
   settings.room = cleanRoom($('roomIn').value); $('roomIn').value = settings.room;
   saveSettings();
@@ -1107,8 +1112,15 @@ function startGame() {
   leaderCache = null; updateScoreTop();
   $('death').hidden = true; shake = 0; dmgT = 0;
   initAudio();
-  setState('playing');
-  if (plWorks !== false) requestLock();
+  if (fromLink) {
+    setState('paused');
+    $('pauseTitle').textContent = `Room ${settings.room}`; $('resumeBtn').textContent = 'Play';
+    $('pauseMsg').textContent = `You're joining as ${settings.name}.`;
+    $('resumeBtn').focus();
+  } else {
+    setState('playing');
+    if (plWorks !== false) requestLock();
+  }
   updateNetStatus();
   if (mode === 'online') {
     startOnline(settings.room);
@@ -1157,7 +1169,7 @@ $('nameIn').value = settings.name;
 $('sensIn').value = settings.sens; $('sensVal').textContent = (+settings.sens).toFixed(1);
 $('sensIn').addEventListener('input', e => { settings.sens = +e.target.value; $('sensVal').textContent = settings.sens.toFixed(1); saveSettings(); });
 $('nameIn').addEventListener('keydown', e => { if (e.key === 'Enter') startGame(); });
-$('playBtn').addEventListener('click', startGame);
+$('playBtn').addEventListener('click', () => startGame());
 $('againBtn').addEventListener('click', playAgain);
 $('menuBtn').addEventListener('click', toMenu);
 $('quitBtn').addEventListener('click', toMenu);
@@ -1196,8 +1208,7 @@ function applyInvite() {
   const code = roomFromLink(); if (!code) return;
   if (settings.mode !== 'online') $('mOnline').click();
   settings.room = code; $('roomIn').value = code; saveSettings();
-  showInviteMsg(`You're invited to room ${code}. Press Join room to jump in.`);
-  $('playBtn').focus();
+  startGame(true);
 }
 $('inviteBtn').addEventListener('click', async () => {
   const code = cleanRoom($('roomIn').value); $('roomIn').value = code;
@@ -1206,7 +1217,6 @@ $('inviteBtn').addEventListener('click', async () => {
 });
 $('pInviteBtn').addEventListener('click', () => copyInvite(settings.room, $('pInviteBtn'), $('pInviteOut')));
 $('roomIn').addEventListener('input', () => { $('inviteOut').hidden = true; showInviteMsg(''); });
-applyInvite();
 addEventListener('hashchange', () => { if (state === 'menu') applyInvite(); });
 $('resumeBtn').addEventListener('click', () => { if (plWorks === false) setState('playing'); else requestLock(); });
 if (matchMedia('(pointer: coarse)').matches && !matchMedia('(any-pointer: fine)').matches) $('touchNote').hidden = false;
@@ -1258,4 +1268,5 @@ if (location.hostname === 'localhost') window.__spud = { player, net, ents };
 resize();
 setupBots(5, 'normal');
 setState('menu');
+applyInvite();
 requestAnimationFrame(frame);
