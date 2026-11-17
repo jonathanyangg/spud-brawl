@@ -7,24 +7,26 @@ const PORT = 3999, base = `ws://localhost:${PORT}/ws`;
 const srv = spawn(process.execPath, ['server.js'], { env: { ...process.env, PORT }, stdio: 'pipe' });
 await new Promise(r => srv.stdout.once('data', r));
 
-const open = (room, id) => new Promise((res, rej) => {
-  const ws = new WebSocket(`${base}?room=${room}&id=${id}`); ws.msgs = [];
-  ws.on('message', d => ws.msgs.push(JSON.parse(d)));
+const open = (room, id, map = '') => new Promise((res, rej) => {
+  const ws = new WebSocket(`${base}?room=${room}&id=${id}&map=${map}`); ws.msgs = [];
+  ws.on('message', d => { const m = JSON.parse(d); if (m.t === 'room') ws.map = m.map; else ws.msgs.push(m); });
   ws.on('open', () => res(ws)); ws.on('error', rej);
 });
 const tick = () => new Promise(r => setTimeout(r, 100));
 
 try {
-  const a = await open('test', 'aaaa1');
+  const a = await open('test', 'aaaa1', 'yard');
   a.send(JSON.stringify({ v: 1, n: 'A' }));
   await tick();
-  const b = await open('test', 'bbbb2');
+  const b = await open('test', 'bbbb2', 'depot');
   await tick();
+  assert.equal(a.map, 'yard', 'first joiner picks the map'); assert.equal(b.map, 'yard', 'later joiners get the room map');
   assert.deepEqual(b.msgs[0], { t: 'p', k: 'aaaa1', pr: { v: 1, n: 'A' } }, 'newcomer gets snapshot');
   b.send(JSON.stringify({ v: 1, n: 'B' })); b.send('not json');
   await tick();
   assert.deepEqual(a.msgs, [{ t: 'p', k: 'bbbb2', pr: { v: 1, n: 'B' } }], 'relay to others only, junk dropped');
-  const other = await open('elsewhere', 'cccc3');
+  const other = await open('elsewhere', 'cccc3', 'nope');
+  await tick(); assert.equal(other.map, 'depot', 'unknown map falls back to the default');
   b.send(JSON.stringify({ v: 1, n: 'B2' })); await tick();
   assert.equal(other.msgs.length, 0, 'rooms are isolated');
   const b2 = await open('test', 'bbbb2'); // reconnect with the same id

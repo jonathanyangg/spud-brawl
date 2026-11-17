@@ -38,4 +38,5 @@ export const sfx = {
   boom: v => { noise(0.9, 380, 0.9 * v); tone(80, 0.6, 0.5 * v, 'sine', 30); },
   reload: () => { tone(500, 0.04, 0.08, 'square'); setTimeout(() => tone(700, 0.04, 0.08, 'square'), 120); },
   toss: () => noise(0.15, 600, 0.15, 'bandpass', 2),
+  slide: () => noise(0.45, 700, 0.22, 'bandpass', 0.6),
 };

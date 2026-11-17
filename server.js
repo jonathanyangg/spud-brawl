@@ -9,6 +9,7 @@ import { WebSocketServer } from 'ws';
 const PORT = process.env.PORT || 3000;
 const PUBLIC = fileURLToPath(new URL('./public/', import.meta.url));
 const MAX_PLAYERS = 12;
+const MAPS = ['depot', 'yard'];
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 
 const server = createServer(async (req, res) => {
@@ -23,7 +24,7 @@ const server = createServer(async (req, res) => {
   }
 });
 
-const rooms = new Map(); // room code -> Map(player id -> socket)
+const rooms = new Map(); // room code -> { map, peers: Map(player id -> socket) }
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024 });
 
 wss.on('connection', (ws, req) => {
@@ -32,15 +33,17 @@ wss.on('connection', (ws, req) => {
   const id = q.get('id');
   if (!/^[a-z0-9]{4,16}$/.test(id || '')) { ws.close(1008, 'bad id'); return; }
 
+  // whoever opens a room picks its map; everyone who joins later plays that map
   let room = rooms.get(code);
-  if (!room) rooms.set(code, room = new Map());
-  const old = room.get(id);
+  if (!room) rooms.set(code, room = { map: MAPS.includes(q.get('map')) ? q.get('map') : MAPS[0], peers: new Map() });
+  const peers = room.peers, old = peers.get(id);
   if (old) old.terminate(); // same player reconnecting: drop the stale socket
-  else if (room.size >= MAX_PLAYERS) { ws.send('{"t":"full"}'); ws.close(); return; }
-  room.set(id, ws);
+  else if (peers.size >= MAX_PLAYERS) { ws.send('{"t":"full"}'); ws.close(); return; }
+  peers.set(id, ws);
+  ws.send(JSON.stringify({ t: 'room', map: room.map }));
 
   // catch the newcomer up on everyone already here
-  for (const [k, peer] of room) if (k !== id && peer.last) ws.send(relay(k, peer.last));
+  for (const [k, peer] of peers) if (k !== id && peer.last) ws.send(relay(k, peer.last));
 
   ws.alive = true;
   ws.on('pong', () => { ws.alive = true; });
@@ -50,14 +53,14 @@ wss.on('connection', (ws, req) => {
     try { const o = JSON.parse(raw); if (!o || typeof o !== 'object' || Array.isArray(o)) return; } catch { return; }
     ws.last = raw;
     const msg = relay(id, raw);
-    for (const [k, peer] of room) if (k !== id && peer.readyState === 1) peer.send(msg);
+    for (const [k, peer] of peers) if (k !== id && peer.readyState === 1) peer.send(msg);
   });
   ws.on('close', () => {
-    if (room.get(id) !== ws) return; // replaced by a reconnect
-    room.delete(id);
-    if (!room.size) rooms.delete(code);
+    if (peers.get(id) !== ws) return; // replaced by a reconnect
+    peers.delete(id);
+    if (!peers.size) rooms.delete(code);
     const bye = JSON.stringify({ t: 'bye', k: id });
-    for (const peer of room.values()) if (peer.readyState === 1) peer.send(bye);
+    for (const peer of peers.values()) if (peer.readyState === 1) peer.send(bye);
   });
 });
 
