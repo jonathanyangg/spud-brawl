@@ -687,6 +687,8 @@ function pressCode(code) {
 }
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('wheel', e => { if (state === 'playing' && player.alive) switchWeapon(player, (player.weapon + (e.deltaY > 0 ? 1 : 2)) % 3); }, { passive: true });
+// Ctrl+W/T/N can't be blocked in a page, so a crouch bound to Ctrl could close the tab: ask first while in a match
+addEventListener('beforeunload', e => { if (state === 'playing') e.preventDefault(); });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; $('board').hidden = true; });
 document.addEventListener('keydown', e => {
   if (rebinding || (e.target && e.target.tagName === 'INPUT')) return;

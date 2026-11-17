@@ -30,11 +30,11 @@ export const ACTIONS = [
   ['reload', 'Reload', 'KeyR'], ['nade', 'Throw frag', 'KeyG'], ['scores', 'Show scores', 'Tab'], ['mute', 'Mute sound', 'KeyM'],
 ];
 export const DEFAULT_BINDS = Object.fromEntries(ACTIONS.map(a => [a[0], a[2]]));
-const BLOCKED_KEYS = ['Escape', 'ControlLeft', 'ControlRight', 'MetaLeft', 'MetaRight', 'OSLeft', 'OSRight', 'ContextMenu', 'F5', 'F11', 'F12'];
+const BLOCKED_KEYS = ['Escape', 'MetaLeft', 'MetaRight', 'OSLeft', 'OSRight', 'ContextMenu', 'F5', 'F11', 'F12'];
 export const validCode = c => typeof c === 'string' && /^(Mouse[0-4]|[A-Za-z][A-Za-z0-9]{0,24})$/.test(c) && !BLOCKED_KEYS.includes(c);
 export function keyName(c) {
   const fixed = { Mouse0: 'Left click', Mouse1: 'Middle click', Mouse2: 'Right click', Mouse3: 'Mouse 4', Mouse4: 'Mouse 5', Space: 'Space',
-    ShiftLeft: 'Left Shift', ShiftRight: 'Right Shift', AltLeft: 'Left Alt', AltRight: 'Right Alt', CapsLock: 'Caps Lock', Backquote: '`',
+    ShiftLeft: 'Left Shift', ShiftRight: 'Right Shift', ControlLeft: 'Left Ctrl', ControlRight: 'Right Ctrl', AltLeft: 'Left Alt', AltRight: 'Right Alt', CapsLock: 'Caps Lock', Backquote: '`',
     Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']', Backslash: '\\', Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/',
     ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right', Backspace: 'Backspace', Enter: 'Enter' };
   if (fixed[c]) return fixed[c];
