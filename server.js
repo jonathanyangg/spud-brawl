@@ -11,7 +11,7 @@ import { handleApi } from './api.js';
 const PORT = process.env.PORT || 3000;
 const PUBLIC = fileURLToPath(new URL('./public/', import.meta.url));
 const MAX_PLAYERS = 12;
-const MAPS = ['depot', 'yard', 'dunes', 'frost', 'stack'];
+const MAPS = ['depot', 'yard', 'dunes', 'frost', 'stack', 'highrise'];
 const GAMES = ['ffa', 'zombies', 'gungame', 'moon', 'snipe']; // aim trainer is solo, never a room
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 

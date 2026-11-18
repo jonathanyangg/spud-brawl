@@ -1,6 +1,6 @@
 // Spud Brawl: a free-for-all arena shooter. three.js is loaded as a global by index.html.
 import { G, JUMP, R, H, EYE, STEP, SCORE_LIMIT, MOVE, WEAPONS, KNIFE, SNIPER, THROWABLES, GAMES, GUNGAME, DIFF, BOT_NAMES, HATS, PLAYER_COLOR, WNAMES, ACTIONS, DEFAULT_BINDS, validCode, keyName } from './config.js';
-import { MAPS, boxes, SPAWNS, boxGeo, loadMap, currentMap, HALF } from './world.js';
+import { MAPS, boxes, SPAWNS, STAIRS, boxGeo, loadMap, currentMap, HALF, LIMIT } from './world.js';
 import { initAudio, sfxShot, sfx, toggleMute, setVolume } from './audio.js';
 import { joinRoom } from './net.js';
 import { setMusic, setMusicOn } from './music.js';
@@ -354,7 +354,7 @@ function respawn(e) {
   e.crouch = e.slideK = e.slide = 0; e.sprint = e.crouchOn = false;
   e.yaw = Math.atan2(e.pos.x, e.pos.z) + rand(-0.4, 0.4); e.pitch = 0; e.protectUntil = now + 1.5; e.lastHurt = -99;
   if (!e.isPlayer) {
-    e.ai.target = null; e.ai.visible = false; e.ai.goal = null;
+    e.ai.target = null; e.ai.visible = false; e.ai.goal = null; e.climb = null;
     e.mesh.visible = true; e.mesh.position.copy(e.pos);
   }
 }
@@ -638,7 +638,41 @@ function canSee(b, t) {
   const d = _h.clone().sub(_o); const dist = d.length(); d.divideScalar(dist);
   return rayWorld(_o, d, dist) >= dist - 0.05;
 }
+// Multi-floor maps: when the goal is a floor up or down, walk to the nearest stairs that start on this floor
+// (preferring ones that end nearest the goal's height), then up or down them.
+function stairWaypoint(e, goal) {
+  if (e.climb) {
+    if (now < e.climb.until && Math.hypot(e.climb.x - e.pos.x, e.climb.z - e.pos.z) > 0.7) return e.climb;
+    e.climb = null;
+  }
+  const dy = goal.y - e.pos.y; if (Math.abs(dy) < 1.5) return null;
+  const up = dy > 0; let best = null, bs = Infinity;
+  for (const st of STAIRS) {
+    if (Math.abs(e.pos.y - (up ? st.y0 : st.y1)) > 1) continue;
+    if (up && goal.y - st.y1 > 1.5 && !STAIRS.some(o => o !== st && Math.abs(o.y0 - st.y1) < 0.3)) continue; // dead end below the goal
+    const [ex, ez] = up ? st.foot : st.top;
+    const score = Math.hypot(ex - e.pos.x, ez - e.pos.z) + 10 * Math.abs(goal.y - (up ? st.y1 : st.y0));
+    if (score < bs) { bs = score; best = st; }
+  }
+  if (!best) return null;
+  const [ex, ez] = up ? best.foot : best.top, [xx, xz] = up ? best.top : best.foot;
+  if (Math.hypot(ex - e.pos.x, ez - e.pos.z) < 1.2) { e.climb = { x: xx, z: xz, until: now + 5 }; return e.climb; }
+  // indoor stairs with a wall in the way: go via the doorway point nearest the stairs that we can walk straight to
+  if (best.via && !clearTo(e, ex, ez)) {
+    let bv = null, bd = Infinity;
+    for (const [vx, vz] of best.via) { const d = Math.hypot(vx - ex, vz - ez); if (d < bd && clearTo(e, vx, vz)) { bd = d; bv = { x: vx, z: vz }; } }
+    if (bv) return bv;
+  }
+  return { x: ex, z: ez };
+}
+// nothing solid between e and (x, z) at knee height
+function clearTo(e, x, z) {
+  _o.set(e.pos.x, e.pos.y + 0.6, e.pos.z); _h.set(x - e.pos.x, 0, z - e.pos.z);
+  const d = _h.length(); if (d < 0.01) return true;
+  _h.divideScalar(d); return rayWorld(_o, _h, d) >= d;
+}
 function randomGoal() {
+  if (STAIRS.length && Math.random() < 0.25) { const st = pick(STAIRS); return new V3(st.top[0], st.y1, st.top[1]); } // roam upstairs too
   for (let i = 0; i < 20; i++) {
     const x = rand(-HALF, HALF), z = rand(-HALF, HALF);
     if (!boxes.some(b => x + 1 > b.min.x && x - 1 < b.max.x && z + 1 > b.min.z && z - 1 < b.max.z)) return new V3(x, 0, z);
@@ -682,12 +716,13 @@ function updateBot(b, dt) {
     if (b.ammo[b.weapon] < w.mag * 0.25 && !b.reloading && dist > 20) startReload(b);
   } else {
     const chasing = now - ai.lastSeenAt < 6;
-    if (!ai.goal || now > ai.goalExpire || Math.hypot(ai.goal.x - b.pos.x, ai.goal.z - b.pos.z) < 1.5) {
+    if (!ai.goal || now > ai.goalExpire || (Math.hypot(ai.goal.x - b.pos.x, ai.goal.z - b.pos.z) < 1.5 && Math.abs(ai.goal.y - b.pos.y) < 1.5)) {
       if (chasing) { ai.goal = ai.lastSeen.clone(); ai.lastSeenAt = -99; } // chase the last sighting once, then wander
       else ai.goal = randomGoal();
-      ai.goalExpire = now + rand(4, 8);
+      ai.goalExpire = now + rand(6, 10);
     }
-    wish.set(ai.goal.x - b.pos.x, 0, ai.goal.z - b.pos.z);
+    const wp = stairWaypoint(b, ai.goal) || ai.goal;
+    wish.set(wp.x - b.pos.x, 0, wp.z - b.pos.z);
     if (!b.reloading && b.ammo[b.weapon] < w.mag) startReload(b);
   }
   if (wish.lengthSq() > 0.0001) wish.normalize();
@@ -1293,7 +1328,7 @@ function applyRemote(id, s) {
     if (state === 'playing') toast(`<em></em> joined`, name, false);
     updateNetStatus();
   }
-  r.target.set(clamp(num(s.p[0]), -32, 32), clamp(num(s.p[1]), 0, 10), clamp(num(s.p[2]), -32, 32));
+  r.target.set(clamp(num(s.p[0]), -32, 32), clamp(num(s.p[1]), 0, 20), clamp(num(s.p[2]), -32, 32));
   r.tyaw = num(s.yw); r.pitch = clamp(num(s.pt), -1.5, 1.5); r.weapon = clamp(s.w | 0, 0, WEAPONS.length - 1);
   r.hp = num(s.hp); r.kills = Math.max(0, s.k | 0); r.deaths = Math.max(0, s.d | 0); r.m = s.m | 0;
   r.dead = s.dd === 1; // a: in play right now; dd: actually down (paused players are neither)
@@ -1482,7 +1517,8 @@ function updateZombie(z, dt, hs) {
   for (const h of hs) if (inPlay(h)) { const d = h.pos.distanceTo(z.pos); if (d < bd) { bd = d; tgt = h; } }
   const wish = new V3();
   if (tgt && now >= z.blindUntil) {
-    wish.set(tgt.pos.x - z.pos.x, 0, tgt.pos.z - z.pos.z).normalize();
+    const wp = stairWaypoint(z, tgt.pos) || tgt.pos; // a target on another floor: head for the stairs
+    wish.set(wp.x - z.pos.x, 0, wp.z - z.pos.z).normalize();
     if (now < z.sideT) wish.set(-wish.z * z.side, 0, wish.x * z.side).addScaledVector(wish, 0.3).normalize(); // detour round a wall
     if (bd < 1.6 && now >= z.atkReady && Math.abs(tgt.pos.y - z.pos.y) < 1.5) {
       z.atkReady = now + 0.9;
@@ -1494,7 +1530,10 @@ function updateZombie(z, dt, hs) {
   const sp = z.speed * (now < z.stunUntil ? 0.4 : 1), k = Math.min(1, (z.onGround ? 8 : 2) * dt);
   z.vel.x += (wish.x * sp - z.vel.x) * k; z.vel.z += (wish.z * sp - z.vel.z) * k;
   moveEntity(z, dt);
-  if (z.bumped && now >= z.sideT) { z.sideT = now + 0.9; z.side = Math.random() < 0.5 ? -1 : 1; if (z.onGround) z.vel.y = JUMP * 0.8; }
+  // blocked: climb the wall if the target is higher up (zombies scale buildings), otherwise go round
+  if (z.bumped && tgt && tgt.pos.y > z.pos.y + 1) z.vel.y = 3.5;
+  else if (z.bumped && now >= z.sideT) { z.sideT = now + 0.9; z.side = Math.random() < 0.5 ? -1 : 1; if (z.onGround) z.vel.y = JUMP * 0.8; }
+  const lim = LIMIT - R; z.pos.x = clamp(z.pos.x, -lim, lim); z.pos.z = clamp(z.pos.z, -lim, lim); // never over the boundary wall
   if (wish.lengthSq() > 0) z.yaw += angDiff(z.yaw, Math.atan2(-wish.x, -wish.z)) * Math.min(1, dt * 8);
   poseSoldier(z, dt);
 }
@@ -1512,7 +1551,7 @@ function syncZombies(zs) {
     if (!Array.isArray(a)) continue;
     const id = a[0] | 0; if (id <= 0) continue;
     seen.add(id);
-    const x = clamp(num(a[1]), -32, 32), y = clamp(num(a[2]), 0, 10), zz = clamp(num(a[3]), -32, 32);
+    const x = clamp(num(a[1]), -32, 32), y = clamp(num(a[2]), 0, 20), zz = clamp(num(a[3]), -32, 32);
     const z = Z.byId.get(id) || addZombie(id, x, zz, true);
     z.target.set(x, y, zz); z.tyaw = num(a[4]); z.hp = num(a[5]);
     Z.nextId = Math.max(Z.nextId, id + 1);
