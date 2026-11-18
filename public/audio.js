@@ -1,7 +1,9 @@
 // Procedural sound effects (Web Audio, no files).
 // ---------- audio ----------
 let ac = null, master = null, noiseBuf = null, muted = false;
-export const toggleMute = () => (muted = !muted);
+// muting silences the master bus, so it covers the music too
+export const toggleMute = () => { muted = !muted; if (master) master.gain.value = muted ? 0 : 0.45; return muted; };
+export const audioOut = () => ac && { ac, master, noiseBuf };
 export function initAudio() {
   if (ac) { if (ac.state === 'suspended') ac.resume(); return; }
   try {
