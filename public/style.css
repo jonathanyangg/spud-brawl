@@ -85,7 +85,7 @@ body{margin:0;background:var(--ink);color:var(--cream);font-family:var(--body);o
 .form{display:grid;gap:14px}
 .row{display:grid;gap:6px}
 .row>label,.row>.lbl{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:500}
-input[type=text]{font:inherit;font-size:16px;background:rgba(255,255,255,.06);border:1px solid var(--line);color:var(--cream);border-radius:6px;padding:9px 12px;max-width:280px}
+input[type=text],input[type=email]{font:inherit;font-size:16px;background:rgba(255,255,255,.06);border:1px solid var(--line);color:var(--cream);border-radius:6px;padding:9px 12px;max-width:280px}
 input[type=range]{width:100%;max-width:280px;accent-color:var(--butter)}
 .seg{display:flex;flex-wrap:wrap;gap:4px}
 .seg button{font:inherit;font-weight:700;font-size:14px;background:rgba(255,255,255,.06);border:1px solid var(--line);color:var(--muted);padding:7px 14px;border-radius:6px;cursor:pointer}
@@ -154,7 +154,7 @@ tr.me td{color:var(--butter)}
 .swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px}
 .sw{font:inherit;display:flex;flex-direction:column;align-items:center;gap:5px;padding:8px 6px;background:rgba(255,255,255,.05);border:2px solid var(--line);border-radius:8px;color:var(--cream);cursor:pointer;text-align:center}
 .sw:hover{border-color:var(--muted)}
-.sw[aria-pressed=true]{border-color:var(--butter);background:rgba(255,200,61,.12)}
+.sw[aria-pressed=true],.sw.pending{border-color:var(--butter);background:rgba(255,200,61,.12)}
 .chipsw{width:52px;height:52px;border-radius:6px;background-size:cover;box-shadow:inset 0 0 0 1px rgba(0,0,0,.4)}
 .chipsw.factory{background:linear-gradient(135deg,#2b2e33 0 50%,#8b6a45 50%)}
 .swname{font-size:13px;font-weight:700}
@@ -187,6 +187,35 @@ tr.me td{color:var(--butter)}
 #overLv{color:var(--cream);font-weight:700}
 #overUnlocks{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
 #overUnlocks li{font-size:12px;font-weight:700;border:1px solid var(--butter);border-radius:5px;padding:3px 8px}
+/* accounts: menu panel, daily spin wheel, coin packs, shop prices in the Armory */
+.account{display:grid;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;max-width:460px}
+.account label{font-size:13px;color:var(--muted)}
+.acctrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
+#acctOut .acctrow{justify-content:flex-start;margin-top:6px}
+#acctEmail{flex:1;min-width:180px}
+#acctIn{display:grid;gap:8px}
+#acctIn .acctrow:last-child{justify-content:flex-start}
+.who{display:flex;flex-direction:column;min-width:0}
+.who small{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis}
+.coins{font-family:var(--display);font-size:18px;color:var(--butter);font-variant-numeric:tabular-nums}
+#spinBtn{font-variant-numeric:tabular-nums}
+#spinBtn.ready{box-shadow:inset 0 0 0 2px var(--butter);color:var(--butter)}
+#acctMsg:empty{display:none}
+#spinOv,#coinOv{background:rgba(20,13,6,.78)}
+.wheelbox{position:relative;width:min(280px,70vw);aspect-ratio:1}
+#wheel{position:absolute;inset:0;border-radius:50%;border:4px solid var(--cream);box-shadow:0 6px 0 rgba(0,0,0,.35);overflow:hidden}
+.wlab{position:absolute;left:50%;top:0;width:0;height:50%;box-sizing:border-box;padding-top:14px;display:flex;justify-content:center;transform-origin:50% 100%;font-weight:800;font-size:12px;color:var(--ink);white-space:nowrap}
+.pointer{position:absolute;left:50%;top:-10px;z-index:1;margin-left:-11px;width:0;height:0;border-left:11px solid transparent;border-right:11px solid transparent;border-top:22px solid var(--cream);filter:drop-shadow(0 2px 1px rgba(0,0,0,.5))}
+#spinMsg{color:var(--cream);font-weight:700;min-height:1.5em}
+#spinWhen{font-variant-numeric:tabular-nums}
+.odds{font-size:13px;color:var(--muted)}
+.odds summary{cursor:pointer}
+.odds ul{text-align:left;margin:6px 0 0;padding-left:18px}
+.packs{display:grid;gap:8px;width:100%}
+.btn.pack{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.btn.pack span{font-family:var(--body);font-weight:700}
+.buybar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:8px 10px;border:1px solid var(--butter);border-radius:8px}
+.sw .price{font-size:11px;color:var(--butter);font-weight:700}
 @media (max-width:560px){
   #hpbox{width:150px}#wbox{min-width:150px}
   #hpnum,#ammo{font-size:28px}

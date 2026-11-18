@@ -2,12 +2,15 @@
   "name": "spud-brawl",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node server.js",
     "test": "node test.js"
   },
   "dependencies": {
+    "stripe": "^23.1.0",
     "ws": "^8.18.0"
   }
 }
