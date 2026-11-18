@@ -6,12 +6,16 @@ import { R } from './config.js';
 const V3 = THREE.Vector3;
 const rand = (a, b) => a + Math.random() * (b - a);
 
-export const MAPS = { depot: 'Depot', yard: 'Market Yard', dunes: 'Dunes', frost: 'Frostbite', stack: 'Stackyard' };
+export const MAPS = { depot: 'Depot', yard: 'Market Yard', dunes: 'Dunes', frost: 'Frostbite', stack: 'Stackyard', highrise: 'Highrise' };
 export const boxes = [];   // { min, max } solid boxes of the loaded map
 export const SPAWNS = [];  // [x, z] ground spawn points of the loaded map
+// every flight of stairs: { foot: [x, z], top: [x, z], y0, y1, via }. Bots and zombies use them to change floors;
+// via lists doorway points (outside and inside each door) for stairs that are indoors.
+export const STAIRS = [];
 export const boxGeo = new THREE.BoxGeometry(1, 1, 1);
 export let currentMap = null;
 export let HALF = 29;
+export let LIMIT = 32; // inner face of the boundary wall
 
 const world = new THREE.Group();
 
@@ -77,6 +81,7 @@ function ground(tex) {
   m.rotation.x = -Math.PI / 2; m.receiveShadow = true; world.add(m);
 }
 function perimeter(mat, h, A = 32) {
+  LIMIT = A;
   addBox(0, -A - 0.5, 2 * A + 2, 1, h, 0, mat); addBox(0, A + 0.5, 2 * A + 2, 1, h, 0, mat);
   addBox(-A - 0.5, 0, 1, 2 * A, h, 0, mat); addBox(A + 0.5, 0, 1, 2 * A, h, 0, mat);
 }
@@ -170,7 +175,7 @@ function depot() {
     addBox(0, z, 5, 4, 0.4, 2.6, M.metal); // deck top at 3.0
     for (const dx of [-2.3, 2.3]) for (const dz of [-1.8, 1.8]) addBox(dx, z + dz, 0.3, 0.3, 2.6, 0, M.metal);
     addBox(0, z + s * 1.95, 5, 0.1, 1, 3, M.rail); addBox(0, z - s * 1.95, 5, 0.1, 1, 3, M.rail); addBox(-2.45, z, 0.1, 4, 1, 3, M.rail);
-    for (let i = 1; i <= 6; i++) addBox(2.5 + (6 - i) * 0.9 + 0.45, z, 0.9, 1.6, i * 0.5, 0, M.dock);
+    stairs(7.9, z, -1, 0, 6, 0, M.dock, 0.5, 0.9, 1.6);
   }
 
   // loading docks on the east and west walls
@@ -201,6 +206,36 @@ function depot() {
 }
 
 // ---------- shared pieces ----------
+// straight stairs: n steps of `rise`, each `run` deep and `w` wide, climbing from (x, z) along (dx, dz)
+// (one of them is ±1) off a floor at y0. The caller puts a floor at the top.
+function stairs(x, z, dx, dz, n, y0, mat, rise = 0.4, run = 0.75, w = 2, via = null) {
+  for (let i = 1; i <= n; i++) { const o = (i - 0.5) * run; addBox(x + dx * o, z + dz * o, dx ? run : w, dz ? run : w, i * rise, y0, mat); }
+  const L = n * run;
+  STAIRS.push({ foot: [x - dx * 0.6, z - dz * 0.6], top: [x + dx * (L + 0.6), z + dz * (L + 0.6)], y0, y1: y0 + n * rise, via });
+}
+// a wall along x (running a..b at z = c) or along z (running a..b at x = c), from y up h, with openings
+// [center, width, sill, top] measured up from y: a door has sill 0, a window doesn't
+function wall(axis, a, b, c, y, h, mat, gaps = [], t = 0.4) {
+  const seg = (u0, u1, y0, y1) => {
+    if (u1 - u0 < 0.01 || y1 - y0 < 0.01) return;
+    if (axis === 'x') addBox((u0 + u1) / 2, c, u1 - u0, t, y1 - y0, y0, mat); else addBox(c, (u0 + u1) / 2, t, u1 - u0, y1 - y0, y0, mat);
+  };
+  let u = a;
+  for (const [g, w, sill, top] of [...gaps].sort((p, q) => p[0] - q[0])) {
+    seg(u, g - w / 2, y, y + h); seg(g - w / 2, g + w / 2, y, y + sill); seg(g - w / 2, g + w / 2, y + top, y + h);
+    u = g + w / 2;
+  }
+  seg(u, b, y, y + h);
+}
+// a floor whose top is at `top`, over x0..x1 by z0..z1, leaving a stairwell hole [hx0, hx1, hz0, hz1]
+function slab(x0, x1, z0, z1, top, mat, hole) {
+  const r = (a, b, c, d) => { if (b - a > 0.01 && d - c > 0.01) addBox((a + b) / 2, (c + d) / 2, b - a, d - c, 0.3, top - 0.3, mat); };
+  if (!hole) return r(x0, x1, z0, z1);
+  const [hx0, hx1, hz0, hz1] = hole;
+  r(x0, hx0, z0, z1); r(hx1, x1, z0, z1); r(hx0, hx1, z0, hz0); r(hx0, hx1, hz1, z1);
+}
+const win = c => [c, 1.8, 1.0, 2.3];
+
 // a roofless hut: four walls, with a 2 m doorway on each side named in `doors` (n, s, e, w)
 function hut(x, z, w, d, h, mat, doors) {
   const t = 0.4, gap = 2;
@@ -220,7 +255,7 @@ function tower(x, z, s, deckM, stepM, railM) {
   addBox(x, z, 5, 4, 0.4, 2.6, deckM);
   for (const dx of [-2.3, 2.3]) for (const dz of [-1.8, 1.8]) addBox(x + dx, z + dz, 0.3, 0.3, 2.6, 0, deckM);
   addBox(x, z + 1.95, 5, 0.1, 1, 3, railM); addBox(x, z - 1.95, 5, 0.1, 1, 3, railM); addBox(x - s * 2.45, z, 0.1, 4, 1, 3, railM);
-  for (let i = 1; i <= 6; i++) addBox(x + s * (2.5 + (6 - i) * 0.9 + 0.45), z, 0.9, 1.6, i * 0.5, 0, stepM);
+  stairs(x + s * 7.9, z, -s, 0, 6, 0, stepM, 0.5, 0.9, 1.6);
 }
 
 // ---------- Dunes: a desert outpost around a raised stone plaza ----------
@@ -232,16 +267,17 @@ function dunes() {
   };
   ground(T.sand());
   perimeter(M.wall, 4);
-  // plaza, 1.5 m up, with steps on all four sides and a pillar at each corner
-  addBox(0, 0, 12, 12, 1.5, 0, M.stone);
-  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) for (let i = 1; i <= 3; i++) {
-    const o = 6 + (3 - i) * 0.8 + 0.4;
-    addBox(dx * o, dz * o, dx ? 0.8 : 3, dz ? 0.8 : 3, i * 0.5, 0, M.stone);
-  }
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) addBox(sx * 4.6, sz * 4.6, 1, 1, 3, 1.5, M.dark);
-  addBox(0, 0, 3, 0.6, 1.1, 1.5, M.dark); // low wall across the plaza
+  // hollow plaza, 2.5 m up on four corner blocks: two tunnels cross underneath, and a flight of steps
+  // climbs each side beside the tunnel mouth (pinwheel, so every side has a way up and a way through)
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) addBox(sx * 4, sz * 4, 4, 4, 2.1, 0, M.stone);
+  addBox(0, 0, 12, 12, 0.4, 2.1, M.stone);
+  stairs(-3.2, -10, 0, 1, 5, 0, M.stone, 0.5, 0.8, 2.4); stairs(3.2, 10, 0, -1, 5, 0, M.stone, 0.5, 0.8, 2.4);
+  stairs(10, -3.2, -1, 0, 5, 0, M.stone, 0.5, 0.8, 2.4); stairs(-10, 3.2, 1, 0, 5, 0, M.stone, 0.5, 0.8, 2.4);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) addBox(sx * 5.3, sz * 5.3, 1, 1, 2.6, 2.5, M.dark);
+  addBox(0, 0, 3, 0.6, 1.1, 2.5, M.dark); // low wall across the top
   // adobe huts in the corners
   hut(-21, -19, 8, 7, 3.2, M.wall, 'se'); hut(21, 19, 8, 7, 3.2, M.wall, 'nw');
+  addBox(21, 19, 8.4, 7.4, 0.3, 3.2, M.stone); stairs(30.6, 17, -1, 0, 7, 0, M.stone, 0.5, 0.8, 1.6); // this one has a flat roof you can climb onto
   hut(19, -21, 7, 8, 3.2, M.wall, 'ws'); hut(-19, 21, 7, 8, 3.2, M.wall, 'en');
   // market stalls: a counter under a cloth awning (the awning is not solid)
   for (const [x, z, c] of [[-12, 0, M.cloth], [12, 0, M.cloth2], [0, 13, M.cloth2], [0, -13, M.cloth]]) {
@@ -266,7 +302,7 @@ function dunes() {
     }
   }
   return { sky: 0xf2d6a2, fog: [45, 125],
-    spawns: [[28, 28], [-28, -28], [28, -28], [-28, 28], [0, 26], [0, -26], [-14, -8], [14, 8], [-6, 18], [6, -18], [22, -2], [-22, 2], [-10, -14], [10, 14]] };
+    spawns: [[28, 28], [-28, -28], [28, -28], [-28, 28], [0, 26], [0, -26], [-14, -8], [14, 8], [-6, 18], [6, -18], [22, -2], [-22, 2], [-10, -14], [10, 14], [0, 0]] };
 }
 
 // ---------- Frostbite: a snowed-in radio outpost with log cabins ----------
@@ -281,7 +317,16 @@ function frost() {
   // frozen pond (flat, walkable)
   const pond = new THREE.Mesh(new THREE.CircleGeometry(7, 40), M.ice); pond.rotation.x = -Math.PI / 2; pond.position.set(-8, 0.02, 8); pond.receiveShadow = true; world.add(pond);
   // cabins
-  hut(16, 16, 9, 7, 3.4, M.logs, 'nw'); hut(-18, -16, 9, 7, 3.4, M.logs, 'se');
+  hut(-18, -16, 9, 7, 3.4, M.logs, 'se');
+  // two-storey lodge: stairs inside up to a walled loft with windows on every side
+  wall('x', 11, 21, 12, 0, 3.2, M.logs, [[14, 2.2, 0, 2.6], win(18)]); wall('x', 11, 21, 20, 0, 3.2, M.logs, [win(14), win(17.5)]);
+  wall('z', 12.2, 19.8, 11, 0, 3.2, M.logs, [[16, 2.2, 0, 2.6]]); wall('z', 12.2, 19.8, 21, 0, 3.2, M.logs, [win(14.5)]);
+  slab(11, 21, 12, 20, 3.2, M.logs, [18.5, 20.7, 13.1, 19.6]);
+  stairs(19.6, 19.2, 0, -1, 8, 0, M.snow, 0.4, 0.75, 2, [[14, 10.5], [14, 13.5], [9.5, 16], [12.5, 16]]);
+  wall('x', 11, 21, 12, 3.2, 2.4, M.logs, [win(13.5), win(16.5)]); wall('x', 11, 21, 20, 3.2, 2.4, M.logs, [win(13.5), win(16.5)]);
+  wall('z', 12.2, 19.8, 11, 3.2, 2.4, M.logs, [win(14), win(18)]); wall('z', 12.2, 19.8, 21, 3.2, 2.4, M.logs, [win(15.5)]);
+  addBox(18.4, 16.35, 0.1, 6.5, 1, 3.2, M.red); // rail beside the stairwell
+  crate(14, 16, 3.2, 1.2);
   hut(18, -18, 7, 9, 3.4, M.logs, 'wn'); hut(-20, 20, 7, 7, 3.4, M.logs, 'es');
   // radio mast on a lookout in the middle
   tower(2, -2, 1, M.metal, M.snow, M.red);
@@ -316,6 +361,12 @@ function stack() {
   container(-10, 10, false, 0x4c7a3a); container(10, 10, true, 0xc8702a); container(-10, 10, false, 0x2f5f8f, 2.6);
   container(0, -4.5, true, 0x2f5f8f); container(0, 4.5, true, 0xb33a2e);
   container(-13, 0, false, 0xc8702a); container(13, 0, false, 0x4c7a3a);
+  // upper deck: steps onto two containers, and catwalks from them to the middle pair, so the top is a second lane
+  const deck = lambert('sDeck', { color: 0x5b6168 });
+  stairs(-17, -10, 1, 0, 5, 0, deck, 0.52, 0.8, 1.6); stairs(17, 10, -1, 0, 5, 0, deck, 0.52, 0.8, 1.6);
+  for (const k of [-1, 1]) {
+    addBox(k * 5, k * 9.75, 4, 1.5, 0.25, 2.35, deck); addBox(k * 3.75, k * 7.75, 1.5, 5.5, 0.25, 2.35, deck);
+  }
   for (const [x, z, y, sz] of [[-4, -13, 0, 1.6], [4, 13, 0, 1.6], [-5, 0, 0, 1.4], [5, 0, 0, 1.4], [-15.5, -15.5, 0, 2], [15.5, 15.5, 0, 2], [-15.5, 15.5, 0, 1.4], [15.5, -15.5, 0, 1.4], [0, -4.5, 2.6, 1.2]]) crate(x, z, y, sz);
   // the rest of the port, beyond the wall (scenery only)
   for (let i = 0; i < 14; i++) {
@@ -326,13 +377,82 @@ function stack() {
     spawns: [[-16, -6], [16, 6], [-6, 16], [6, -16], [-16, 6], [16, -6], [6, 16], [-6, -16], [0, 0], [-7, -7], [7, 7], [-7, 7], [7, -7], [0, 15], [0, -15]] };
 }
 
+// ---------- Highrise: a three-storey block and a two-storey annex joined by a skybridge ----------
+// Stairs zigzag up the main block (east, west, east) to a roof with a parapet; the 2nd floor has a balcony.
+function highrise() {
+  const M = {
+    wall: lambert('hWall', () => ({ map: T.concrete(), color: 0xb8b2a6 })), band: lambert('hBand', { color: 0x7a8088 }),
+    floor: lambert('hFloor', () => ({ map: T.concrete(), color: 0x8f8a80 })), step: lambert('hStep', { color: 0x9a948a }),
+    rail: lambert('hRail', { color: 0xd4a017 }), annex: lambert('hAnnex', { color: 0xa0624a }), far: lambert('hFar', { color: 0x6d7682 }),
+    glass: lambert('hGlass', { color: 0x2a3440 }), car: [0x2f5f8f, 0xb33a2e, 0xd8d8d8].map(c => lambert('car' + c, { color: c })),
+  };
+  const container = (x, z, alongX, color, y = 0) =>
+    addBox(x, z, alongX ? 6 : 2.5, alongX ? 2.5 : 6, 2.6, y, lambert('box' + color, () => ({ map: T.ribs(), color })));
+  ground(T.asphalt());
+  perimeter(lambert('hPerim', () => ({ map: T.concrete(), color: 0xa9a59c })), 4);
+
+  // main block, x -8..8, z -6..6: walls per floor with doors and windows
+  const door = (c, w = 2.2) => [c, w, 0, 2.6];
+  const floors = [
+    { y: 0, s: [door(0, 2.4), win(-5), win(4)], n: [door(-3), win(2.5)], w: [door(0), win(-4), win(4)], e: [win(-3), win(3.5)] },
+    { y: 3.2, s: [win(-5.5), win(-2), win(2), win(5.5)], n: [win(-5.5), win(-2), win(2)], w: [win(-3.5), win(0.5)], e: [win(-3), [3, 2, 0, 2.5]] },
+    { y: 6.4, s: [win(-5.5), door(0, 2.4), win(5.5)], n: [win(-5), win(0), win(5)], w: [win(-3.5), win(3.5)], e: [win(-3.5), win(3.5)] },
+  ];
+  for (const f of floors) {
+    wall('x', -8, 8, 6, f.y, 3.2, M.wall, f.s); wall('x', -8, 8, -6, f.y, 3.2, M.wall, f.n);
+    wall('z', -5.8, 5.8, -8, f.y, 3.2, M.wall, f.w); wall('z', -5.8, 5.8, 8, f.y, 3.2, M.wall, f.e);
+  }
+  slab(-8, 8, -6, 6, 3.2, M.floor, [5.4, 7.6, -5.8, 1.1]);
+  slab(-8, 8, -6, 6, 6.4, M.floor, [-7.6, -5.4, -1.1, 5.8]);
+  slab(-8, 8, -6, 6, 9.6, M.floor, [5.4, 7.6, -5.8, 1.1]);
+  stairs(6.5, -5, 0, 1, 8, 0, M.step, 0.4, 0.75, 2, [[0, 7.5], [0, 4.5], [-9.5, 0], [-6.5, 0], [-3, -7.5], [-3, -4.5]]);
+  stairs(-6.5, 5, 0, -1, 8, 3.2, M.step); stairs(6.5, -5, 0, 1, 8, 6.4, M.step);
+  // rails along the open side of each stairwell
+  addBox(5.3, -2.35, 0.1, 6.9, 1, 3.2, M.rail); addBox(-5.3, 2.35, 0.1, 6.9, 1, 6.4, M.rail); addBox(5.3, -2.35, 0.1, 6.9, 1, 9.6, M.rail);
+  // roof parapet, 2nd-floor balcony over the front door
+  wall('x', -8, 8, 6, 9.6, 1, M.band); wall('x', -8, 8, -6, 9.6, 1, M.band); wall('z', -5.8, 5.8, -8, 9.6, 1, M.band); wall('z', -5.8, 5.8, 8, 9.6, 1, M.band);
+  slab(-4, 4, 6, 8.5, 6.4, M.floor);
+  addBox(0, 8.45, 8, 0.1, 1, 6.4, M.rail); addBox(-3.95, 7.25, 0.1, 2.5, 1, 6.4, M.rail); addBox(3.95, 7.25, 0.1, 2.5, 1, 6.4, M.rail);
+  // cover on every floor
+  addBox(-2, 2.5, 4, 0.6, 1.1, 0, M.band); crate(-6, -4, 0, 1.4); crate(2, -4, 0, 1.4);
+  crate(-2, -3, 3.2, 1.4); crate(3, -3, 3.2, 1.2); addBox(-1, 0.5, 0.4, 4, 1.2, 3.2, M.band); // keep the walk between stairwells clear
+  crate(-1, 4.2, 6.4, 1.6); crate(-3, 2, 6.4, 1.2); crate(3, 2.5, 6.4, 1.2);
+  crate(-4, -3, 9.6, 1.4); crate(2, 3, 9.6, 1.2);
+  const mast = new THREE.Mesh(boxGeo, M.band); mast.scale.set(0.2, 5, 0.2); mast.position.set(-6, 12.6, -4); world.add(mast);
+
+  // annex, x 16..24, z -4..4: stairs inside up to a walled roof terrace; the skybridge lands on the terrace
+  wall('x', 16, 24, 4, 0, 3.2, M.annex, [door(20), win(22.5)]); wall('x', 16, 24, -4, 0, 3.2, M.annex, [win(18), win(22)]);
+  wall('z', -3.8, 3.8, 16, 0, 3.2, M.annex, [door(-2), win(1.5)]); wall('z', -3.8, 3.8, 24, 0, 3.2, M.annex, [win(0)]);
+  slab(16, 24, -4, 4, 3.2, M.floor, [21.7, 23.9, -3.1, 3.1]);
+  stairs(22.8, 3, 0, -1, 8, 0, M.step, 0.4, 0.75, 2, [[14.5, -2], [17.5, -2], [20, 5.5], [20, 2.5]]);
+  wall('x', 16, 24, 4, 3.2, 1.1, M.annex); wall('x', 16, 24, -4, 3.2, 1.1, M.annex);
+  wall('z', -3.8, 3.8, 16, 3.2, 1.1, M.annex, [[3, 2, 0, 1.1]]); wall('z', -3.8, 3.8, 24, 3.2, 1.1, M.annex);
+  addBox(21.6, 0, 0.1, 6.2, 1, 3.2, M.rail);
+  // skybridge from the main block's 1st floor (east door) to the annex roof, open underneath
+  addBox(12, 3, 8, 2, 0.3, 2.9, M.floor); addBox(12, 2.05, 8, 0.1, 1, 3.2, M.rail); addBox(12, 3.95, 8, 0.1, 1, 3.2, M.rail);
+
+  // the street: parked cars, barriers, and two containers you can climb
+  const car = (x, z, alongX, m) => { addBox(x, z, alongX ? 4.2 : 1.9, alongX ? 1.9 : 4.2, 1, 0, m); addBox(x, z, alongX ? 2.2 : 1.7, alongX ? 1.7 : 2.2, 0.6, 1, M.glass); };
+  car(-4, 12, true, M.car[0]); car(6, 14, true, M.car[1]); car(-20, -10, false, M.car[2]); car(20, 14, false, M.car[0]); car(-14, 20, true, M.car[1]); car(12, -16, true, M.car[2]);
+  for (const [x, z, w, d] of [[-14, 4, 0.6, 4], [14, -6, 0.6, 4], [0, 18, 4, 0.6], [0, -16, 4, 0.6], [-22, 12, 4, 0.6], [24, -18, 0.6, 4]]) addBox(x, z, w, d, 1, 0, M.band);
+  container(-22, -20, true, 0x4c7a3a); stairs(-15, -20, -1, 0, 5, 0, M.step, 0.52, 0.8, 1.6);
+  container(22, 20, true, 0xc8702a); stairs(15, 20, 1, 0, 5, 0, M.step, 0.52, 0.8, 1.6);
+  // skyline beyond the wall (scenery only)
+  for (let i = 0; i < 18; i++) {
+    const a = i / 18 * Math.PI * 2 + rand(-0.08, 0.08), r = rand(48, 72);
+    addBox(Math.cos(a) * r, Math.sin(a) * r, rand(8, 16), rand(8, 16), rand(15, 40), 0, M.far, false).rotation.y = a;
+  }
+  return { sky: 0x9fb8d0, fog: [45, 130],
+    spawns: [[0, 26], [0, -26], [27, 26], [-27, -26], [27, -26], [-27, 26], [-24, 2], [28, 6], [12, 22], [-12, -22], [-14, 12], [14, -10], [-3, 4], [19, 0], [-24, -12]] };
+}
+
 // Clears the current map and builds `name` (falls back to the default map).
 export function loadMap(scene, name) {
   if (!MAPS[name]) name = 'depot';
   scene.remove(world);
   world.traverse(o => { if (o.isMesh && o.geometry !== boxGeo) o.geometry.dispose(); });
-  world.clear(); boxes.length = 0; SPAWNS.length = 0;
-  const m = { depot, yard, dunes, frost, stack }[name]();
+  world.clear(); boxes.length = 0; SPAWNS.length = 0; STAIRS.length = 0;
+  const m = { depot, yard, dunes, frost, stack, highrise }[name]();
   HALF = m.half || 29;
   scene.add(world);
   scene.background = new THREE.Color(m.sky);

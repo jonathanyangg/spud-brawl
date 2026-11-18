@@ -4,7 +4,15 @@ Arena shooter in the browser (three.js). Play vs bots, or online with friends in
 
 **Games:** Free-for-all, Zombies (co-op waves, solo or online), Gun Game, Moon Knives (knives only, low gravity), Snipers Only (one body shot kills), and a solo Aim Trainer.
 
-**Maps:** Depot (containers, a gutted office, sniper decks), Market Yard, Dunes (desert outpost round a raised plaza), Frostbite (snowed-in radio outpost) and Stackyard (a tiny square of containers for fast fights).
+**Maps:**
+- **Highrise:** a three-storey block (stairwells zigzag up to a roof, with a balcony on the 2nd floor) joined by a skybridge to an annex with a roof terrace.
+- **Depot:** containers, a gutted office, sniper decks.
+- **Market Yard:** the original.
+- **Dunes:** a desert outpost whose raised plaza has tunnels crossing underneath, plus a hut you can climb onto.
+- **Frostbite:** a snowed-in radio outpost with a two-storey lodge.
+- **Stackyard:** a tiny square of containers with catwalks across the tops, for fast fights on two levels.
+
+Bots and zombies use the stairs (each map lists its flights, with doorway points for indoor ones), and zombies climb walls to reach anyone above them.
 
 ```
 npm install
