@@ -18,12 +18,13 @@
 
   <div class="hud" id="hud" hidden>
     <div id="hurt"></div>
+    <div id="stunFx"></div>
     <div id="scope" hidden></div>
     <div id="dmgdir"><span></span></div>
     <div id="scoretop">
-      <div class="chip you"><small>You</small><span id="sYou">0</span></div>
-      <div class="chip"><small>Top rival</small><span id="sLead">-</span></div>
-      <div class="chip"><small>To win</small><span id="sGoal">20</span></div>
+      <div class="chip you"><small id="sYouL">You</small><span id="sYou">0</span></div>
+      <div class="chip"><small id="sLeadL">Top rival</small><span id="sLead">-</span></div>
+      <div class="chip"><small id="sGoalL">To win</small><span id="sGoal">20</span></div>
       <div class="chip lv"><small>Lv</small><span id="sLv">1</span></div>
     </div>
     <div id="netStatus" hidden></div>
@@ -45,12 +46,13 @@
       <div id="slots"><span>1 SMG</span><span>2 Shotgun</span><span>3 Sniper</span></div>
       <div id="nade">Frag ready</div>
     </div>
+    <div id="flashFx"></div>
   </div>
 
   <div class="overlay" id="menu">
     <div class="menu-inner">
       <h1 class="title">Spud<br>Brawl</h1>
-      <p class="tag">Free-for-all firefight. Sprint, slide and aim down sights. First to 20 eliminations wins.</p>
+      <p class="tag">Free-for-all firefights, zombie waves and minigames. Sprint, slide and aim down sights.</p>
       <div class="profile">
         <div class="lvbadge" id="pLv" aria-label="Level 1">1</div>
         <div class="pxp">
@@ -72,10 +74,25 @@
           </div>
         </div>
         <div class="row">
+          <div class="lbl" id="gameLbl">Game</div>
+          <div class="seg" id="gameSeg" role="group" aria-labelledby="gameLbl" aria-describedby="gameHelp">
+            <button type="button" data-v="ffa" aria-pressed="true">Free-for-all</button>
+            <button type="button" data-v="zombies" aria-pressed="false">Zombies</button>
+            <button type="button" data-v="gungame" aria-pressed="false">Gun Game</button>
+            <button type="button" data-v="moon" aria-pressed="false">Moon Knives</button>
+            <button type="button" data-v="snipe" aria-pressed="false">Snipers Only</button>
+            <button type="button" id="gAim" data-v="aim" aria-pressed="false">Aim Trainer</button>
+          </div>
+          <p class="help" id="gameHelp"></p>
+        </div>
+        <div class="row">
           <div class="lbl" id="mapLbl">Map</div>
           <div class="seg" id="mapSeg" role="group" aria-labelledby="mapLbl">
             <button type="button" data-v="depot" aria-pressed="true">Depot</button>
             <button type="button" data-v="yard" aria-pressed="false">Market Yard</button>
+            <button type="button" data-v="dunes" aria-pressed="false">Dunes</button>
+            <button type="button" data-v="frost" aria-pressed="false">Frostbite</button>
+            <button type="button" data-v="stack" aria-pressed="false">Stackyard</button>
           </div>
         </div>
         <div id="botRows" class="form">
@@ -106,22 +123,12 @@
             <input type="text" id="inviteOut" readonly aria-label="Invite link" hidden>
           </div>
           <p class="help" id="inviteMsg" aria-live="polite" hidden></p>
-          <p class="help" id="onlineHelp">Everyone types the same room code, or opens your invite link, and presses Join room. A new room plays the map you picked.</p>
-        </div>
-        <div class="row">
-          <div class="lbl" id="musicLbl">Music</div>
-          <div class="seg" id="musicSeg" role="group" aria-labelledby="musicLbl">
-            <button type="button" data-v="true" aria-pressed="true">On</button>
-            <button type="button" data-v="false" aria-pressed="false">Off</button>
-          </div>
-        </div>
-        <div class="row">
-          <label for="sensIn">Mouse sensitivity <span id="sensVal">1.0</span></label>
-          <input type="range" id="sensIn" min="0.3" max="2.5" step="0.1" value="1">
+          <p class="help" id="onlineHelp">Everyone types the same room code, or opens your invite link, and presses Join room. A new room plays the game and map you picked.</p>
         </div>
       </div>
       <div class="actions">
         <button class="btn" id="playBtn" type="button">Play</button>
+        <button class="btn ghost" id="setBtn" type="button">Settings</button>
         <button class="btn ghost" id="ctrlBtn" type="button">Controls</button>
       </div>
       <p class="note" id="touchNote" hidden>Spud Brawl needs a keyboard and mouse. On this device you can watch the bots brawl.</p>
@@ -135,11 +142,47 @@
       <p id="pauseMsg">Click Resume to grab the mouse again.</p>
       <div class="actions" style="justify-content:center">
         <button class="btn" id="resumeBtn" type="button">Resume</button>
+        <button class="btn ghost" id="pArmBtn" type="button">Loadout</button>
+        <button class="btn ghost" id="pSetBtn" type="button">Settings</button>
         <button class="btn ghost" id="pCtrlBtn" type="button">Controls</button>
         <button class="btn ghost" id="pInviteBtn" type="button" hidden>Copy invite link</button>
         <button class="btn ghost" id="quitBtn" type="button">Quit to menu</button>
       </div>
       <input type="text" id="pInviteOut" readonly aria-label="Invite link" hidden>
+    </div>
+  </div>
+
+  <div class="overlay" id="settings" hidden>
+    <div class="card" role="dialog" aria-modal="true" aria-labelledby="setTitle">
+      <h2 id="setTitle">Settings</h2>
+      <div class="form">
+        <div class="row">
+          <label for="sensIn">Mouse sensitivity <span id="sensVal">1.0</span></label>
+          <input type="range" id="sensIn" min="0.3" max="2.5" step="0.1" value="1">
+        </div>
+        <div class="row">
+          <label for="adsIn">Aiming sensitivity <span id="adsVal">1.0</span></label>
+          <input type="range" id="adsIn" min="0.3" max="2" step="0.1" value="1">
+        </div>
+        <div class="row">
+          <label for="fovIn">Field of view <span id="fovVal">75</span></label>
+          <input type="range" id="fovIn" min="60" max="100" step="1" value="75">
+        </div>
+        <div class="row">
+          <label for="volIn">Sound volume <span id="volVal">100%</span></label>
+          <input type="range" id="volIn" min="0" max="1" step="0.05" value="1">
+        </div>
+        <div class="row">
+          <div class="lbl" id="musicLbl">Music</div>
+          <div class="seg" id="musicSeg" role="group" aria-labelledby="musicLbl">
+            <button type="button" data-v="true" aria-pressed="true">On</button>
+            <button type="button" data-v="false" aria-pressed="false">Off</button>
+          </div>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn" id="setDone" type="button">Done</button>
+      </div>
     </div>
   </div>
 

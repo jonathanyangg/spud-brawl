@@ -1,15 +1,17 @@
 // Maps: textures, collision boxes and spawn points. Every solid thing is an axis-aligned box.
-// Both maps are 64 x 64 inside the perimeter wall, so bounds elsewhere stay the same.
+// Maps are 64 x 64 inside the perimeter wall, except Stackyard, which walls off a small square in the middle.
+// HALF is how far from the center the playable ground reaches, for bots and spawns that pick random spots.
 import { R } from './config.js';
 
 const V3 = THREE.Vector3;
 const rand = (a, b) => a + Math.random() * (b - a);
 
-export const MAPS = { depot: 'Depot', yard: 'Market Yard' };
+export const MAPS = { depot: 'Depot', yard: 'Market Yard', dunes: 'Dunes', frost: 'Frostbite', stack: 'Stackyard' };
 export const boxes = [];   // { min, max } solid boxes of the loaded map
 export const SPAWNS = [];  // [x, z] ground spawn points of the loaded map
 export const boxGeo = new THREE.BoxGeometry(1, 1, 1);
 export let currentMap = null;
+export let HALF = 29;
 
 const world = new THREE.Group();
 
@@ -47,6 +49,12 @@ const T = {
     g.strokeStyle = '#7a4f22'; g.lineWidth = 12; g.strokeRect(6, 6, s - 12, s - 12);
     g.lineWidth = 10; g.beginPath(); g.moveTo(10, 10); g.lineTo(s - 10, s - 10); g.stroke();
   }),
+  sand: () => canvasTex(256, (g, s) => {
+    g.fillStyle = '#d9b77c'; g.fillRect(0, 0, s, s); speckle(2600, () => `hsl(${rand(32, 42)},${rand(40, 58)}%,${rand(58, 74)}%)`, 2)(g, s);
+    g.strokeStyle = 'rgba(150,110,60,.25)'; g.lineWidth = 2;
+    for (let y = 8; y < s; y += 22) { g.beginPath(); g.moveTo(0, y); for (let x = 0; x <= s; x += 16) g.lineTo(x, y + Math.sin(x / 20 + y) * 4); g.stroke(); }
+  }, 60),
+  snow: () => canvasTex(256, (g, s) => { g.fillStyle = '#e9eef2'; g.fillRect(0, 0, s, s); speckle(2200, () => `hsl(205,${rand(10, 30)}%,${rand(80, 96)}%)`, 3)(g, s); }, 60),
   planks: (rx, ry) => canvasTex(128, (g, s) => {
     g.fillStyle = '#c99a5b'; g.fillRect(0, 0, s, s);
     for (let x = 0; x < s; x += 32) { g.fillStyle = `hsl(32,${rand(38, 48)}%,${rand(50, 58)}%)`; g.fillRect(x, 0, 31, s); g.fillStyle = 'rgba(70,40,12,.4)'; g.fillRect(x + 31, 0, 1, s); }
@@ -68,8 +76,7 @@ function ground(tex) {
   const m = new THREE.Mesh(new THREE.PlaneGeometry(260, 260), new THREE.MeshLambertMaterial({ map: tex }));
   m.rotation.x = -Math.PI / 2; m.receiveShadow = true; world.add(m);
 }
-function perimeter(mat, h) {
-  const A = 32;
+function perimeter(mat, h, A = 32) {
   addBox(0, -A - 0.5, 2 * A + 2, 1, h, 0, mat); addBox(0, A + 0.5, 2 * A + 2, 1, h, 0, mat);
   addBox(-A - 0.5, 0, 1, 2 * A, h, 0, mat); addBox(A + 0.5, 0, 1, 2 * A, h, 0, mat);
 }
@@ -193,13 +200,140 @@ function depot() {
     spawns: [[29, 20], [-29, -20], [20, 28], [-20, -28], [29, -28], [-29, 28], [0, -17], [0, 17], [17, 0], [-17, 0], [10, -25], [-10, 25], [24, -6], [-24, 6]] };
 }
 
+// ---------- shared pieces ----------
+// a roofless hut: four walls, with a 2 m doorway on each side named in `doors` (n, s, e, w)
+function hut(x, z, w, d, h, mat, doors) {
+  const t = 0.4, gap = 2;
+  for (const [side, sz] of [['n', -1], ['s', 1]]) {
+    const zz = z + sz * d / 2;
+    if (doors.includes(side)) { const seg = (w - gap) / 2; addBox(x - (gap + seg) / 2, zz, seg, t, h, 0, mat); addBox(x + (gap + seg) / 2, zz, seg, t, h, 0, mat); }
+    else addBox(x, zz, w, t, h, 0, mat);
+  }
+  for (const [side, sx] of [['w', -1], ['e', 1]]) {
+    const xx = x + sx * w / 2, len = d - t;
+    if (doors.includes(side)) { const seg = (len - gap) / 2; addBox(xx, z - (gap + seg) / 2, t, seg, h, 0, mat); addBox(xx, z + (gap + seg) / 2, t, seg, h, 0, mat); }
+    else addBox(xx, z, t, len, h, 0, mat);
+  }
+}
+// a lookout deck (top at 3 m) on legs, with 0.5 m steps running toward +x (s = 1) or -x (s = -1)
+function tower(x, z, s, deckM, stepM, railM) {
+  addBox(x, z, 5, 4, 0.4, 2.6, deckM);
+  for (const dx of [-2.3, 2.3]) for (const dz of [-1.8, 1.8]) addBox(x + dx, z + dz, 0.3, 0.3, 2.6, 0, deckM);
+  addBox(x, z + 1.95, 5, 0.1, 1, 3, railM); addBox(x, z - 1.95, 5, 0.1, 1, 3, railM); addBox(x - s * 2.45, z, 0.1, 4, 1, 3, railM);
+  for (let i = 1; i <= 6; i++) addBox(x + s * (2.5 + (6 - i) * 0.9 + 0.45), z, 0.9, 1.6, i * 0.5, 0, stepM);
+}
+
+// ---------- Dunes: a desert outpost around a raised stone plaza ----------
+function dunes() {
+  const M = {
+    wall: lambert('uWall', { color: 0xd9b47c }), stone: lambert('uStone', { color: 0xc49a62 }), dark: lambert('uDark', { color: 0x8a6a45 }),
+    cloth: lambert('uCloth', { color: 0xb0412e, side: THREE.DoubleSide }), cloth2: lambert('uCloth2', { color: 0x2f7f8f, side: THREE.DoubleSide }),
+    wood: lambert('uWood', () => ({ map: T.planks(2, 1) })),
+  };
+  ground(T.sand());
+  perimeter(M.wall, 4);
+  // plaza, 1.5 m up, with steps on all four sides and a pillar at each corner
+  addBox(0, 0, 12, 12, 1.5, 0, M.stone);
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) for (let i = 1; i <= 3; i++) {
+    const o = 6 + (3 - i) * 0.8 + 0.4;
+    addBox(dx * o, dz * o, dx ? 0.8 : 3, dz ? 0.8 : 3, i * 0.5, 0, M.stone);
+  }
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) addBox(sx * 4.6, sz * 4.6, 1, 1, 3, 1.5, M.dark);
+  addBox(0, 0, 3, 0.6, 1.1, 1.5, M.dark); // low wall across the plaza
+  // adobe huts in the corners
+  hut(-21, -19, 8, 7, 3.2, M.wall, 'se'); hut(21, 19, 8, 7, 3.2, M.wall, 'nw');
+  hut(19, -21, 7, 8, 3.2, M.wall, 'ws'); hut(-19, 21, 7, 8, 3.2, M.wall, 'en');
+  // market stalls: a counter under a cloth awning (the awning is not solid)
+  for (const [x, z, c] of [[-12, 0, M.cloth], [12, 0, M.cloth2], [0, 13, M.cloth2], [0, -13, M.cloth]]) {
+    const along = x === 0;
+    addBox(x, z, along ? 4 : 1, along ? 1 : 4, 1.1, 0, M.wood);
+    const aw = new THREE.Mesh(boxGeo, c); aw.scale.set(along ? 4.6 : 2.6, 0.08, along ? 2.6 : 4.6); aw.position.set(x, 2.6, z); aw.castShadow = true; world.add(aw);
+    for (const p of [-1, 1]) addBox(x + (along ? p * 2.1 : 0), z + (along ? 0 : p * 2.1), 0.15, 0.15, 2.6, 0, M.dark, false);
+  }
+  // lookouts west and east
+  tower(-26, 6, 1, M.wood, M.stone, M.dark); tower(26, -6, -1, M.wood, M.stone, M.dark);
+  // broken walls and barrels for cover
+  for (const [x, z, w, d, h] of [[-10, -22, 6, 0.6, 2], [10, 22, 6, 0.6, 2], [-24, -6, 0.6, 5, 1.6], [24, 6, 0.6, 5, 1.6], [8, -9, 0.6, 3, 1.2], [-8, 9, 0.6, 3, 1.2]]) addBox(x, z, w, d, h, 0, M.wall);
+  for (const [x, z] of [[-15, 12], [15, -12], [-5, 22], [5, -22], [-28, -26], [28, 26]]) crate(x, z, 0, 1.6);
+  // palms beyond the wall
+  const trunkM = lambert('palmT', { color: 0x8a6a3e }), leafM = lambert('palmL', { color: 0x5d8a3a, side: THREE.DoubleSide });
+  for (let i = 0; i < 22; i++) {
+    const a = i / 22 * Math.PI * 2 + rand(-0.1, 0.1), r = rand(40, 60), x = Math.cos(a) * r, z = Math.sin(a) * r, h = rand(6, 9);
+    const t = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.4, h, 6), trunkM); t.position.set(x, h / 2, z); t.castShadow = true; world.add(t);
+    for (let k = 0; k < 5; k++) {
+      const l = new THREE.Mesh(new THREE.PlaneGeometry(4, 1), leafM); const ang = k / 5 * Math.PI * 2;
+      l.position.set(x + Math.cos(ang) * 1.8, h - 0.3, z + Math.sin(ang) * 1.8); l.rotation.set(-Math.PI / 2 + 0.4, 0, -ang); world.add(l);
+    }
+  }
+  return { sky: 0xf2d6a2, fog: [45, 125],
+    spawns: [[28, 28], [-28, -28], [28, -28], [-28, 28], [0, 26], [0, -26], [-14, -8], [14, 8], [-6, 18], [6, -18], [22, -2], [-22, 2], [-10, -14], [10, 14]] };
+}
+
+// ---------- Frostbite: a snowed-in radio outpost with log cabins ----------
+function frost() {
+  const M = {
+    wall: lambert('fWall', () => ({ map: T.concrete(), color: 0xb9c7d2 })), logs: lambert('fLogs', () => ({ map: T.planks(3, 1), color: 0x9c7a5a })),
+    snow: lambert('fSnow', { color: 0xf3f7fa }), metal: lambert('fMetal', { color: 0x5b6670 }), red: lambert('fRed', { color: 0xc23b2e }),
+    ice: new THREE.MeshLambertMaterial({ color: 0xa8d4ec, transparent: true, opacity: 0.85 }),
+  };
+  ground(T.snow());
+  perimeter(M.wall, 4.5);
+  // frozen pond (flat, walkable)
+  const pond = new THREE.Mesh(new THREE.CircleGeometry(7, 40), M.ice); pond.rotation.x = -Math.PI / 2; pond.position.set(-8, 0.02, 8); pond.receiveShadow = true; world.add(pond);
+  // cabins
+  hut(16, 16, 9, 7, 3.4, M.logs, 'nw'); hut(-18, -16, 9, 7, 3.4, M.logs, 'se');
+  hut(18, -18, 7, 9, 3.4, M.logs, 'wn'); hut(-20, 20, 7, 7, 3.4, M.logs, 'es');
+  // radio mast on a lookout in the middle
+  tower(2, -2, 1, M.metal, M.snow, M.red);
+  for (let i = 0; i < 6; i++) { const m = new THREE.Mesh(boxGeo, i % 2 ? M.red : lambert('fWhite', { color: 0xffffff })); m.scale.set(0.25, 2, 0.25); m.position.set(0.5, 4 + i * 2, -2); world.add(m); }
+  // snow banks and fuel tanks
+  for (const [x, z, w, d, h] of [[-6, -10, 6, 1.4, 1.1], [10, 6, 1.4, 6, 1.1], [-14, 2, 1.4, 5, 1.1], [6, 14, 5, 1.4, 1.1], [24, 2, 1.4, 6, 1.3], [-24, -4, 1.4, 6, 1.3], [-2, -24, 7, 1.4, 1.2], [4, 25, 7, 1.4, 1.2]]) addBox(x, z, w, d, h, 0, M.snow);
+  for (const [x, z] of [[-26, 8], [26, -8], [10, -26], [-10, 26]]) {
+    addBox(x, z, 2.4, 4.4, 2.4, 0, M.metal, true).visible = false; // collision only; the round tank below is what you see
+    const t = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 4.4, 14), M.metal); t.rotation.x = Math.PI / 2; t.position.set(x, 1.2, z); t.castShadow = t.receiveShadow = true; world.add(t);
+  }
+  for (const [x, z] of [[-4, 18], [12, -10], [-12, -24], [26, 26]]) crate(x, z, 0, 1.6);
+  // pines beyond the wall
+  const leafM = lambert('pine', { color: 0x2f5a3f }), capM = lambert('pineSnow', { color: 0xf3f7fa }), trunkM = lambert('trunk', { color: 0x6b4a2b });
+  for (let i = 0; i < 40; i++) {
+    const a = i / 40 * Math.PI * 2 + rand(-0.05, 0.05), r = rand(40, 64), x = Math.cos(a) * r, z = Math.sin(a) * r, s = rand(0.9, 1.5);
+    const t = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.4, 2, 6), trunkM); t.position.set(x, 1, z); world.add(t);
+    const c = new THREE.Mesh(new THREE.ConeGeometry(2.4 * s, 6 * s, 8), leafM); c.position.set(x, 2 + 3 * s, z); c.castShadow = true; world.add(c);
+    const cap = new THREE.Mesh(new THREE.ConeGeometry(1 * s, 2 * s, 8), capM); cap.position.set(x, 2 + 5.4 * s, z); world.add(cap);
+  }
+  return { sky: 0xcfdce6, fog: [35, 105],
+    spawns: [[28, 28], [-28, -28], [28, -28], [-28, 28], [0, 28], [0, -28], [28, 0], [-28, 0], [-8, 8], [14, 2], [-12, -6], [8, -14], [-2, 14], [20, -26]] };
+}
+
+// ---------- Stackyard: a tiny square of shipping containers, fights in seconds ----------
+function stack() {
+  const M = { wall: lambert('sWall', () => ({ map: T.concrete(), color: 0x8f949a })), far: lambert('dFar', { color: 0x7d858c }) };
+  const container = (x, z, alongX, color, y = 0) =>
+    addBox(x, z, alongX ? 6 : 2.5, alongX ? 2.5 : 6, 2.6, y, lambert('box' + color, () => ({ map: T.ribs(), color })));
+  ground(T.asphalt());
+  perimeter(M.wall, 5, 18);
+  container(-10, -10, true, 0xb33a2e); container(10, -10, false, 0x2f5f8f); container(10, -10, false, 0xc8702a, 2.6);
+  container(-10, 10, false, 0x4c7a3a); container(10, 10, true, 0xc8702a); container(-10, 10, false, 0x2f5f8f, 2.6);
+  container(0, -4.5, true, 0x2f5f8f); container(0, 4.5, true, 0xb33a2e);
+  container(-13, 0, false, 0xc8702a); container(13, 0, false, 0x4c7a3a);
+  for (const [x, z, y, sz] of [[-4, -13, 0, 1.6], [4, 13, 0, 1.6], [-5, 0, 0, 1.4], [5, 0, 0, 1.4], [-15.5, -15.5, 0, 2], [15.5, 15.5, 0, 2], [-15.5, 15.5, 0, 1.4], [15.5, -15.5, 0, 1.4], [0, -4.5, 2.6, 1.2]]) crate(x, z, y, sz);
+  // the rest of the port, beyond the wall (scenery only)
+  for (let i = 0; i < 14; i++) {
+    const a = i / 14 * Math.PI * 2, r = rand(30, 50);
+    const b = addBox(Math.cos(a) * r, Math.sin(a) * r, rand(6, 12), rand(6, 12), rand(5, 12), 0, M.far, false); b.rotation.y = a;
+  }
+  return { sky: 0xe7b98c, fog: [30, 90], half: 16,
+    spawns: [[-16, -6], [16, 6], [-6, 16], [6, -16], [-16, 6], [16, -6], [6, 16], [-6, -16], [0, 0], [-7, -7], [7, 7], [-7, 7], [7, -7], [0, 15], [0, -15]] };
+}
+
 // Clears the current map and builds `name` (falls back to the default map).
 export function loadMap(scene, name) {
   if (!MAPS[name]) name = 'depot';
   scene.remove(world);
   world.traverse(o => { if (o.isMesh && o.geometry !== boxGeo) o.geometry.dispose(); });
   world.clear(); boxes.length = 0; SPAWNS.length = 0;
-  const m = name === 'yard' ? yard() : depot();
+  const m = { depot, yard, dunes, frost, stack }[name]();
+  HALF = m.half || 29;
   scene.add(world);
   scene.background = new THREE.Color(m.sky);
   scene.fog = new THREE.Fog(m.sky, m.fog[0], m.fog[1]);

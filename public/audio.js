@@ -1,14 +1,16 @@
 // Procedural sound effects (Web Audio, no files).
 // ---------- audio ----------
-let ac = null, master = null, noiseBuf = null, muted = false;
+let ac = null, master = null, noiseBuf = null, muted = false, vol = 1;
 // muting silences the master bus, so it covers the music too
-export const toggleMute = () => { muted = !muted; if (master) master.gain.value = muted ? 0 : 0.45; return muted; };
+const gainNow = () => (muted ? 0 : 0.45 * vol);
+export const toggleMute = () => { muted = !muted; if (master) master.gain.value = gainNow(); return muted; };
+export const setVolume = v => { vol = v; if (master) master.gain.value = gainNow(); };
 export const audioOut = () => ac && { ac, master, noiseBuf };
 export function initAudio() {
   if (ac) { if (ac.state === 'suspended') ac.resume(); return; }
   try {
     ac = new (window.AudioContext || window.webkitAudioContext)();
-    master = ac.createGain(); master.gain.value = 0.45; master.connect(ac.destination);
+    master = ac.createGain(); master.gain.value = gainNow(); master.connect(ac.destination);
     noiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
     const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
   } catch (e) { ac = null; }
@@ -30,7 +32,10 @@ function tone(freq, dur, vol, type = 'square', to) {
 export function sfxShot(wi, v) {
   if (wi === 0) { noise(0.08, 2400, 0.32 * v, 'bandpass', 0.7); tone(200, 0.05, 0.12 * v, 'square', 90); }
   else if (wi === 1) { noise(0.35, 900, 0.65 * v); tone(120, 0.2, 0.3 * v, 'sine', 40); }
-  else { noise(0.5, 1700, 0.5 * v); tone(320, 0.28, 0.22 * v, 'sawtooth', 55); }
+  else if (wi === 2) { noise(0.5, 1700, 0.5 * v); tone(320, 0.28, 0.22 * v, 'sawtooth', 55); }
+  else if (wi === 3) { noise(0.1, 1600, 0.4 * v, 'bandpass', 0.8); tone(150, 0.07, 0.16 * v, 'square', 70); }
+  else if (wi === 4) { noise(0.7, 500, 0.6 * v); tone(90, 0.5, 0.3 * v, 'sawtooth', 40); }
+  else noise(0.12, 3200, 0.22 * v, 'highpass', 0.8); // knife swish
 }
 export const sfx = {
   hit: () => tone(1250, 0.05, 0.16, 'square', 900),
@@ -41,4 +46,6 @@ export const sfx = {
   reload: () => { tone(500, 0.04, 0.08, 'square'); setTimeout(() => tone(700, 0.04, 0.08, 'square'), 120); },
   toss: () => noise(0.15, 600, 0.15, 'bandpass', 2),
   slide: () => noise(0.45, 700, 0.22, 'bandpass', 0.6),
+  stun: v => { noise(0.5, 1200, 0.5 * v, 'bandpass', 3); tone(220, 0.5, 0.25 * v, 'sine', 110); },
+  flash: v => { noise(0.3, 5000, 0.6 * v, 'highpass'); tone(3200, 1.2, 0.12 * v, 'sine', 3000); },
 };

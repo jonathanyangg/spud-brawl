@@ -1,8 +1,10 @@
 # Spud Brawl
 
-Free-for-all arena shooter in the browser (three.js). Play vs bots, or online with friends in a shared room.
+Arena shooter in the browser (three.js). Play vs bots, or online with friends in a shared room.
 
-Two maps: **Depot** (shipping containers, a gutted office, sniper decks, loading docks) and **Market Yard**.
+**Games:** Free-for-all, Zombies (co-op waves, solo or online), Gun Game, Moon Knives (knives only, low gravity), Snipers Only (one body shot kills), and a solo Aim Trainer.
+
+**Maps:** Depot (containers, a gutted office, sniper decks), Market Yard, Dunes (desert outpost round a raised plaza), Frostbite (snowed-in radio outpost) and Stackyard (a tiny square of containers for fast fights).
 
 ```
 npm install
@@ -25,7 +27,13 @@ npm test         # progression logic + relay self-check
 
 ## Controls
 
-WASD move, Shift sprint, C crouch, Space jump, right-click aim down sights, 1/2/3 or wheel for SMG/Shotgun/Sniper, G frag, R reload. All rebindable under Controls.
+WASD move, Shift sprint, C crouch, Space jump, right-click aim down sights, 1/2/3 or wheel to switch weapon, G throw equipment, R reload. All rebindable under Controls.
+
+**Settings** (sensitivity, aiming sensitivity, field of view, volume, music) and your **Loadout** open from the pause screen too, so you never have to leave a match. Weapon changes made mid-match apply when you next respawn.
+
+## Weapons
+
+Six weapons; you carry three: SMG, Shotgun, Sniper, AR, RPG (unlocks at level 6, splash damage, rocket-jumps hurt) and Knife (faster movement). One throwable: Frag, Stun (slows movement and aim; level 3) or Flashbang (whites out anyone looking at it; level 5).
 
 **Slide:** press crouch while sprinting. **Slide cancel:** press crouch again (or jump) mid-slide to pop straight back into a sprint with the slide's speed. Chain them to move faster than a plain sprint.
 
@@ -34,7 +42,7 @@ WASD move, Shift sprint, C crouch, Space jump, right-click aim down sights, 1/2/
 Every kill earns XP (more for headshots, frags and streaks), and every finished match adds a bonus, bigger for a win. There are 55 levels.
 
 - **Uniforms** unlock as you level up and dress your soldier's legs and arms (other players see them online).
-- **Gun camos** unlock per weapon from kills and headshots with that gun: Woodland, Desert, Urban, Tiger, Crimson, Gold. Get Gold on all three guns for Nebula.
+- **Camos** unlock per weapon from kills and headshots with it: Woodland, Desert, Urban, Tiger, Crimson, Gold (the RPG skips the headshot goals). Get Gold on any three weapons for Nebula.
 - **Attachments** unlock by level; equip up to two per gun: Extended mag (+50% mag, slower reload), Laser sight (tighter hip fire), Suppressor (quiet shots, no muzzle flash, less range), Fast mag (30% faster reload).
 
 Pick them in the **Armory** from the main menu. The menu shows your level, XP bar and how many unlocks you haven't looked at yet.
@@ -45,9 +53,11 @@ Music can be turned off in the menu; **M** mutes everything.
 
 ## Online play
 
-Pick **Online with friends**, type a room code, press **Join room**. **Copy invite link** gives a URL that drops friends into the same room. Up to 12 players per room. Whoever opens a room picks its map; everyone who joins plays that map.
+Pick **Online with friends**, type a room code, press **Join room**. **Copy invite link** gives a URL that drops friends into the same room. Up to 12 players per room. Whoever opens a room picks its game and map; everyone who joins plays those.
 
 Each client owns its own health: shooters report hits, and the player who was hit applies the damage and announces their own death. That's fine for friends, but it trusts the clients.
+
+In Zombies, one player runs the zombies for the room (the lowest player id still in the match) and streams them with their presence; everyone else sends their hits on zombies to that player. If they leave, the next player picks the zombies up where they are.
 
 ## Deploy
 

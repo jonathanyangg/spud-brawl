@@ -1,12 +1,12 @@
-// The Armory: pick a uniform, a camo per gun, and up to two attachments per gun.
+// The Armory: your loadout (3 weapons + 1 throwable), a uniform, a camo per weapon, and up to two attachments per gun.
 // Edits the progress object in place and calls back so the game can save and re-dress the player.
-import { WEAPONS } from './config.js';
-import { LOOKS, UNIFORMS, CAMOS, ATTACH, MAX_ATTACH, level, uniformUnlocked, camoUnlocked, attachUnlocked, camoNeed } from './progress.js';
+import { WEAPONS, THROWABLES } from './config.js';
+import { LOOKS, UNIFORMS, CAMOS, ATTACH, MAX_ATTACH, level, uniformUnlocked, camoUnlocked, attachUnlocked, camoNeed, weaponUnlocked, throwableUnlocked } from './progress.js';
 import { lookSwatch } from './skins.js';
 
 const $ = id => document.getElementById(id);
-const TABS = ['Soldier', ...WEAPONS.map(w => w.name)];
-let prog = null, changed = () => {}, closed = () => {}, tab = 0;
+const TABS = ['Loadout', 'Soldier', ...WEAPONS.map(w => w.name)];
+let prog = null, changed = () => {}, closed = () => {}, tab = 0, inMatch = false;
 
 export function initArmory(p, { onChange, onClose }) {
   prog = p; changed = onChange; closed = onClose;
@@ -24,7 +24,9 @@ export function initArmory(p, { onChange, onClose }) {
   $('armDone').addEventListener('click', closeArmory);
   document.addEventListener('keydown', e => { if (e.code === 'Escape' && !$('armory').hidden) { e.preventDefault(); closeArmory(); } });
 }
-export function openArmory() {
+// inMatch: opened from the pause screen; weapon changes wait for the next respawn
+export function openArmory(fromMatch = false) {
+  inMatch = fromMatch;
   prog.fresh = 0; changed(); // seen it: clear the "new" count
   $('armMsg').textContent = '';
   render(); $('armory').hidden = false; $('armTab' + tab).focus();
@@ -51,7 +53,8 @@ function render() {
   $('armBody').setAttribute('aria-labelledby', 'armTab' + tab);
   const body = $('armBody'); body.textContent = '';
   const lv = level(prog);
-  if (tab === 0) {
+  if (tab === 0) return renderLoadout(body, lv);
+  if (tab === 1) {
     body.append(el('h3', null, 'Uniform'), el('p', 'help', `Level ${lv}. Higher levels unlock more uniforms.`));
     const grid = el('div', 'swatches');
     for (const [id, need] of UNIFORMS) grid.append(swatchBtn(id, prog.uniform === id, uniformUnlocked(prog, id) ? '' : `Level ${need}`, () => { prog.uniform = id; }));
@@ -59,11 +62,12 @@ function render() {
     body.append(el('p', 'help', `${prog.matches} matches played · ${prog.wins} won`));
     return;
   }
-  const wi = tab - 1;
+  const wi = tab - 2;
   body.append(el('h3', null, 'Camo'), el('p', 'help', `${prog.wk[wi]} kills · ${prog.wh[wi]} headshots with the ${WEAPONS[wi].name}`));
   const grid = el('div', 'swatches');
   for (const [id] of CAMOS) grid.append(swatchBtn(id, prog.camo[wi] === id, camoUnlocked(prog, wi, id) ? '' : camoNeed(prog, wi, id), () => { prog.camo[wi] = id; }));
   body.append(grid);
+  if (WEAPONS[wi].noAtt) return;
   body.append(el('h3', null, 'Attachments'), el('p', 'help', `Equip up to ${MAX_ATTACH}.`));
   const list = el('div', 'atts');
   for (const id in ATTACH) {
@@ -82,4 +86,43 @@ function render() {
     list.append(b);
   }
   body.append(list);
+}
+
+// a checkbox-like row: title, description, a tick when on, a lock note when locked
+function optionBtn(key, title, desc, on, lockText, click) {
+  const b = el('button', 'att'); b.type = 'button'; b.dataset.key = key; b.setAttribute('aria-pressed', String(on));
+  const txt = el('span', 'atttxt'); txt.append(el('b', null, title), el('small', null, desc));
+  b.append(el('span', 'tick', on ? '\u2713' : ''), txt, el('span', 'swlock', lockText || (on ? 'Equipped' : '')));
+  if (lockText) { b.classList.add('locked'); b.setAttribute('aria-disabled', 'true'); }
+  b.addEventListener('click', () => {
+    if (lockText) { $('armMsg').textContent = `${title} unlocks at ${lockText.toLowerCase()}.`; return; }
+    if (click() === false) return;
+    $('armMsg').textContent = inMatch ? 'Weapon changes apply when you next respawn.' : ''; changed(); render(); refocus(key);
+  });
+  return b;
+}
+const DESC = { SMG: 'Fast and light, short range', Shotgun: 'Nine pellets, deadly up close', Sniper: 'Scoped, two-shot body, one-shot head',
+  AR: 'Accurate auto at any range', RPG: 'One rocket, big splash. Rocket-jump at your own risk', Knife: 'One swing, quick feet' };
+const TDESC = { frag: 'Explodes after a short fuse', stun: 'Slows movement and aim for a few seconds', flash: 'Blinds anyone looking at it' };
+function renderLoadout(body, lv) {
+  body.append(el('h3', null, 'Weapons'), el('p', 'help', `Carry up to 3. Keys 1, 2 and 3 follow this order: ${prog.loadout.map(i => WEAPONS[i].name).join(', ')}.` +
+    (inMatch ? ' In a match, changes apply when you next respawn.' : '')));
+  const list = el('div', 'atts');
+  WEAPONS.forEach((w, i) => {
+    const on = prog.loadout.includes(i);
+    list.append(optionBtn('w' + i, w.name, DESC[w.name] || '', on, weaponUnlocked(prog, i) ? '' : `Level ${w.level}`, () => {
+      if (on) {
+        if (prog.loadout.length <= 1) { $('armMsg').textContent = 'Keep at least one weapon.'; return false; }
+        prog.loadout = prog.loadout.filter(x => x !== i);
+      } else if (prog.loadout.length >= 3) { $('armMsg').textContent = 'You carry 3 weapons. Take one off first.'; return false; }
+      else prog.loadout.push(i);
+    }));
+  });
+  body.append(list, el('h3', null, 'Equipment'), el('p', 'help', 'One throwable, on the equipment key.'));
+  const eq = el('div', 'atts');
+  for (const id in THROWABLES) {
+    const t = THROWABLES[id];
+    eq.append(optionBtn('t' + id, t.name, TDESC[id], prog.nade === id, throwableUnlocked(prog, id) ? '' : `Level ${t.level}`, () => { prog.nade = id; }));
+  }
+  body.append(eq);
 }

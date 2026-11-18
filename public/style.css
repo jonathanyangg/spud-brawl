@@ -54,6 +54,8 @@ body{margin:0;background:var(--ink);color:var(--cream);font-family:var(--body);o
 #scope::before{left:50%;top:0;bottom:0;width:2px;margin-left:-1px}
 #scope::after{top:50%;left:0;right:0;height:2px;margin-top:-1px}
 #hurt{position:absolute;inset:0;box-shadow:inset 0 0 160px 40px rgba(229,67,45,.85);opacity:0}
+#stunFx{position:absolute;inset:0;box-shadow:inset 0 0 220px 70px rgba(90,160,255,.75);opacity:0}
+#flashFx{position:absolute;inset:0;background:#fff;opacity:0}
 #dmgdir{position:absolute;left:50%;top:50%;width:230px;height:230px;margin:-115px 0 0 -115px;opacity:0}
 #dmgdir span{position:absolute;inset:0;border-radius:50%;border:6px solid transparent;border-top-color:var(--ketchup);filter:drop-shadow(0 0 6px rgba(229,67,45,.8))}
 
@@ -116,7 +118,11 @@ tr.me td{color:var(--butter)}
 .help{margin:0;font-size:13px;line-height:1.5;color:var(--muted);max-width:46ch}
 .help.warn{color:var(--cream);background:rgba(229,67,45,.18);border:1px solid rgba(229,67,45,.5);border-radius:6px;padding:8px 10px}
 .btn:disabled{opacity:.45;cursor:not-allowed;box-shadow:none;transform:none}
-#controls,#armory{background:rgba(20,13,6,.78)}
+#controls,#armory,#settings{background:rgba(20,13,6,.78)}
+#settings .card{width:min(460px,100%);text-align:left;align-items:stretch;max-height:calc(100dvh - 32px);overflow:auto}
+#settings h2{text-align:center}
+#settings .actions{justify-content:center}
+#gameHelp{min-height:1.5em}
 .invite{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .btn.small{font-size:14px;padding:9px 14px}
 #inviteOut,#pInviteOut{width:100%;max-width:100%;font-size:13px}

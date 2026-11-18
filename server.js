@@ -9,7 +9,8 @@ import { WebSocketServer } from 'ws';
 const PORT = process.env.PORT || 3000;
 const PUBLIC = fileURLToPath(new URL('./public/', import.meta.url));
 const MAX_PLAYERS = 12;
-const MAPS = ['depot', 'yard'];
+const MAPS = ['depot', 'yard', 'dunes', 'frost', 'stack'];
+const GAMES = ['ffa', 'zombies', 'gungame', 'moon', 'snipe']; // aim trainer is solo, never a room
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 
 const server = createServer(async (req, res) => {
@@ -33,14 +34,14 @@ wss.on('connection', (ws, req) => {
   const id = q.get('id');
   if (!/^[a-z0-9]{4,16}$/.test(id || '')) { ws.close(1008, 'bad id'); return; }
 
-  // whoever opens a room picks its map; everyone who joins later plays that map
+  // whoever opens a room picks its map and game type; everyone who joins later plays those
   let room = rooms.get(code);
-  if (!room) rooms.set(code, room = { map: MAPS.includes(q.get('map')) ? q.get('map') : MAPS[0], peers: new Map() });
+  if (!room) rooms.set(code, room = { map: MAPS.includes(q.get('map')) ? q.get('map') : MAPS[0], game: GAMES.includes(q.get('game')) ? q.get('game') : GAMES[0], peers: new Map() });
   const peers = room.peers, old = peers.get(id);
   if (old) old.terminate(); // same player reconnecting: drop the stale socket
   else if (peers.size >= MAX_PLAYERS) { ws.send('{"t":"full"}'); ws.close(); return; }
   peers.set(id, ws);
-  ws.send(JSON.stringify({ t: 'room', map: room.map }));
+  ws.send(JSON.stringify({ t: 'room', map: room.map, game: room.game }));
 
   // catch the newcomer up on everyone already here
   for (const [k, peer] of peers) if (k !== id && peer.last) ws.send(relay(k, peer.last));
