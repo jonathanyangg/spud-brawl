@@ -1,12 +1,14 @@
 // The Armory: your loadout (3 weapons + 1 throwable), a uniform, a camo per weapon, and up to two attachments per gun.
 // Edits the progress object in place and calls back so the game can save and re-dress the player.
+// Signed in, it also lists coin-shop looks: owned ones equip like any other, the rest show a price and a Buy button.
 import { WEAPONS, THROWABLES } from './config.js';
-import { LOOKS, UNIFORMS, CAMOS, ATTACH, MAX_ATTACH, level, uniformUnlocked, camoUnlocked, attachUnlocked, camoNeed, weaponUnlocked, throwableUnlocked } from './progress.js';
+import { LOOKS, UNIFORMS, CAMOS, ATTACH, MAX_ATTACH, PREMIUM, premiumOf, level, uniformUnlocked, camoUnlocked, attachUnlocked, camoNeed, weaponUnlocked, throwableUnlocked } from './progress.js';
 import { lookSwatch } from './skins.js';
+import { shop } from './account.js';
 
 const $ = id => document.getElementById(id);
 const TABS = ['Loadout', 'Soldier', ...WEAPONS.map(w => w.name)];
-let prog = null, changed = () => {}, closed = () => {}, tab = 0, inMatch = false;
+let prog = null, changed = () => {}, closed = () => {}, tab = 0, inMatch = false, pending = null; // pending: shop item awaiting Buy
 
 export function initArmory(p, { onChange, onClose }) {
   prog = p; changed = onChange; closed = onClose;
@@ -14,19 +16,19 @@ export function initArmory(p, { onChange, onClose }) {
   TABS.forEach((t, i) => {
     const b = document.createElement('button'); b.type = 'button'; b.textContent = t; b.dataset.i = i;
     b.setAttribute('role', 'tab'); b.id = 'armTab' + i; b.setAttribute('aria-controls', 'armBody');
-    b.addEventListener('click', () => { tab = i; render(); });
+    b.addEventListener('click', () => { tab = i; pending = null; render(); });
     tabs.append(b);
   });
   tabs.addEventListener('keydown', e => {
     const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0; if (!d) return;
-    e.preventDefault(); tab = (tab + d + TABS.length) % TABS.length; render(); $('armTab' + tab).focus();
+    e.preventDefault(); tab = (tab + d + TABS.length) % TABS.length; pending = null; render(); $('armTab' + tab).focus();
   });
   $('armDone').addEventListener('click', closeArmory);
   document.addEventListener('keydown', e => { if (e.code === 'Escape' && !$('armory').hidden) { e.preventDefault(); closeArmory(); } });
 }
 // inMatch: opened from the pause screen; weapon changes wait for the next respawn
 export function openArmory(fromMatch = false) {
-  inMatch = fromMatch;
+  inMatch = fromMatch; pending = null;
   prog.fresh = 0; changed(); // seen it: clear the "new" count
   $('armMsg').textContent = '';
   render(); $('armory').hidden = false; $('armTab' + tab).focus();
@@ -34,12 +36,17 @@ export function openArmory(fromMatch = false) {
 export function closeArmory() { $('armory').hidden = true; closed(); }
 
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
-function swatchBtn(id, on, lockText, pick) {
+// a look's chip and name, no behavior
+function lookBtn(id, on) {
   const b = el('button', 'sw'); b.type = 'button'; b.dataset.key = id;
   const chip = el('span', 'chipsw'), url = lookSwatch(id);
   if (url) chip.style.backgroundImage = `url(${url})`; else chip.classList.add('factory');
   b.append(chip, el('span', 'swname', LOOKS[id].name));
   b.setAttribute('aria-pressed', String(on));
+  return b;
+}
+function swatchBtn(id, on, lockText, pick) {
+  const b = lookBtn(id, on);
   if (lockText) { b.classList.add('locked'); b.setAttribute('aria-disabled', 'true'); b.append(el('span', 'swlock', lockText)); }
   b.addEventListener('click', () => {
     if (lockText) { $('armMsg').textContent = `${LOOKS[id].name} is locked: ${lockText}.`; return; }
@@ -59,6 +66,7 @@ function render() {
     const grid = el('div', 'swatches');
     for (const [id, need] of UNIFORMS) grid.append(swatchBtn(id, prog.uniform === id, uniformUnlocked(prog, id) ? '' : `Level ${need}`, () => { prog.uniform = id; }));
     body.append(grid);
+    shopSection(body, 'uniform', id => prog.uniform === id, id => { prog.uniform = id; });
     body.append(el('p', 'help', `${prog.matches} matches played · ${prog.wins} won`));
     return;
   }
@@ -67,6 +75,7 @@ function render() {
   const grid = el('div', 'swatches');
   for (const [id] of CAMOS) grid.append(swatchBtn(id, prog.camo[wi] === id, camoUnlocked(prog, wi, id) ? '' : camoNeed(prog, wi, id), () => { prog.camo[wi] = id; }));
   body.append(grid);
+  shopSection(body, 'camo', id => prog.camo[wi] === id, id => { prog.camo[wi] = id; });
   if (WEAPONS[wi].noAtt) return;
   body.append(el('h3', null, 'Attachments'), el('p', 'help', `Equip up to ${MAX_ATTACH}.`));
   const list = el('div', 'atts');
@@ -86,6 +95,44 @@ function render() {
     list.append(b);
   }
   body.append(list);
+}
+
+// Coin-shop looks (signed in only). Prices and balances come from the server; Buy asks it to spend the coins.
+function shopSection(body, kind, isOn, pick) {
+  if (!shop.on) return;
+  body.append(el('h3', null, kind === 'camo' ? 'Shop camos' : 'Shop uniforms'),
+    el('p', 'help', `You have ${shop.coins.toLocaleString()} coins.${kind === 'camo' ? ' A bought camo fits every weapon.' : ''}`));
+  const grid = el('div', 'swatches');
+  for (const id of premiumOf(kind)) {
+    const price = PREMIUM[id].price;
+    if (prog.owned.includes(id) || !price) { grid.append(swatchBtn(id, isOn(id), prog.owned.includes(id) ? '' : 'Daily spin only', () => pick(id))); continue; }
+    const b = lookBtn(id, false); // not owned: clicking offers to buy, never equips
+    b.classList.toggle('pending', pending === id);
+    b.append(el('span', 'price', `${price.toLocaleString()} coins`));
+    b.addEventListener('click', () => { pending = id; $('armMsg').textContent = ''; render(); if ($('armBuy')) $('armBuy').focus(); else refocus(id); });
+    grid.append(b);
+  }
+  body.append(grid);
+  if (pending && PREMIUM[pending]?.kind === kind && !prog.owned.includes(pending)) body.append(buyBar(pending, pick));
+}
+function buyBar(id, pick) {
+  const price = PREMIUM[id].price, name = `${LOOKS[id].name} ${PREMIUM[id].kind}`, bar = el('div', 'buybar');
+  if (shop.coins < price) {
+    bar.append(el('span', null, `${name} costs ${price.toLocaleString()} coins. You have ${shop.coins.toLocaleString()}.`));
+    return bar;
+  }
+  const buy = el('button', 'btn small', `Buy for ${price.toLocaleString()}`); buy.type = 'button'; buy.id = 'armBuy';
+  const cancel = el('button', 'btn ghost small', 'Cancel'); cancel.type = 'button';
+  bar.append(el('span', null, `Buy the ${name}? You have ${shop.coins.toLocaleString()} coins.`), buy, cancel);
+  cancel.addEventListener('click', () => { pending = null; render(); refocus(id); });
+  buy.addEventListener('click', async () => {
+    buy.disabled = cancel.disabled = true; $('armMsg').textContent = 'Buying…';
+    const r = await shop.buy(id);
+    if (r.error) { $('armMsg').textContent = r.error; buy.disabled = cancel.disabled = false; return; }
+    pending = null; pick(id); changed(); render(); refocus(id);
+    $('armMsg').textContent = `${name} bought and equipped.`;
+  });
+  return bar;
 }
 
 // a checkbox-like row: title, description, a tick when on, a lock note when locked

@@ -1,0 +1,169 @@
+// Accounts, coins, the daily spin, the shop, Stripe and cloud saves: everything under /api.
+// Nothing here trusts the client: the caller's Supabase token is checked on every call, rewards and prices are
+// decided here, and every write uses the service-role key through atomic Postgres functions (supabase/schema.sql).
+// With no env vars set, /api/config says so and every other route answers 503; the game runs as before.
+import { randomInt } from 'node:crypto';
+import { loadProgress, mergeProgress } from './public/progress.js';
+import { pickSpin, spinState, SPIN_COOLDOWN_MS, COIN_PACKS, packById, buyCheck } from './public/economy.js';
+
+const env = process.env;
+const SB_URL = (env.SUPABASE_URL || '').trim().replace(/\/+$/, '');
+const ANON = (env.SUPABASE_ANON_KEY || '').trim(), SERVICE = (env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+const WEBHOOK_SECRET = (env.STRIPE_WEBHOOK_SECRET || '').trim();
+export const accountsOn = !!(SB_URL && ANON && SERVICE);
+// stripe is only loaded when a key is set, so a server without one runs exactly the code it ran before
+const stripe = env.STRIPE_SECRET_KEY ? new (await import('stripe')).default(env.STRIPE_SECRET_KEY.trim()) : null;
+// selling coins needs somewhere to put them (accounts) and a way to hear about payments (webhook secret)
+export const paymentsOn = !!(stripe && WEBHOOK_SECRET && accountsOn);
+if (SB_URL && ANON && !SERVICE) console.warn('SUPABASE_SERVICE_ROLE_KEY is missing: accounts stay off');
+if (stripe && !paymentsOn) console.warn('Stripe key set, but coin packs stay off until Supabase and STRIPE_WEBHOOK_SECRET are set too');
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const NOT_CONFIGURED = { error: 'Accounts are not configured on this server' };
+class HttpError extends Error { constructor(status, msg, extra) { super(msg); this.status = status; this.extra = extra; } }
+const send = (res, status, obj) => res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(obj));
+
+function readBody(req, limit) {
+  return new Promise((resolve, reject) => {
+    const chunks = []; let size = 0;
+    req.on('data', c => { size += c.length; if (size > limit) { reject(new HttpError(413, 'Request too large')); req.destroy(); } else chunks.push(c); });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+async function readJson(req) {
+  const raw = await readBody(req, 64 * 1024);
+  try { const o = JSON.parse(raw.toString() || '{}'); if (o && typeof o === 'object' && !Array.isArray(o)) return o; } catch {}
+  throw new HttpError(400, 'Bad JSON');
+}
+
+// ---------- Supabase over plain fetch ----------
+// New-style secret keys (sb_secret_...) are not JWTs and go only in the apikey header; legacy JWT keys also go in Authorization.
+const serviceHeaders = () => ({ apikey: SERVICE, ...(SERVICE.startsWith('sb_') ? {} : { authorization: `Bearer ${SERVICE}` }), 'content-type': 'application/json' });
+async function sb(path, { method = 'GET', body, prefer } = {}) {
+  const r = await fetch(`${SB_URL}${path}`, { method, headers: { ...serviceHeaders(), ...(prefer ? { prefer } : {}) },
+    body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(10000) });
+  const text = await r.text();
+  if (!r.ok) throw new Error(`Supabase ${method} ${path.split('?')[0]}: ${r.status} ${text.slice(0, 200)}`);
+  return text ? JSON.parse(text) : null;
+}
+const rpc = (fn, args) => sb(`/rest/v1/rpc/${fn}`, { method: 'POST', body: args });
+
+// Auth getUser: the only proof of who is calling. Returns { id, email } or throws 401.
+async function caller(req) {
+  const m = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization || '');
+  if (!m) throw new HttpError(401, 'Sign in first');
+  const r = await fetch(`${SB_URL}/auth/v1/user`, { headers: { apikey: ANON, authorization: `Bearer ${m[1]}` }, signal: AbortSignal.timeout(10000) });
+  if (!r.ok) throw new HttpError(401, 'Session expired, sign in again');
+  const u = await r.json();
+  if (!UUID.test(u?.id || '')) throw new HttpError(401, 'Session expired, sign in again');
+  return { id: u.id, email: String(u.email || '') };
+}
+// The signup trigger makes profiles; this covers anyone it missed.
+async function profile(uid) {
+  const q = `/rest/v1/profiles?id=eq.${uid}&select=coins,last_spin,owned,progress`;
+  let rows = await sb(q);
+  if (!rows.length) { await sb('/rest/v1/profiles', { method: 'POST', body: { id: uid }, prefer: 'resolution=ignore-duplicates,return=minimal' }); rows = await sb(q); }
+  const p = rows[0]; if (!p) throw new Error('profile missing after insert');
+  return { coins: p.coins | 0, last_spin: p.last_spin, owned: Array.isArray(p.owned) ? p.owned : [], progress: p.progress };
+}
+const spinInfo = lastSpin => { const s = spinState(lastSpin, Date.now()); return { spinReady: s.ready, nextSpin: s.next }; };
+// stored progress, cleaned with the same rules the client uses; owned always comes from the profile, never the save
+const cleanSave = (progress, owned) => loadProgress(JSON.stringify(progress ?? null), owned);
+const forStorage = ({ owned, ...save }) => save;
+
+// ---------- routes ----------
+const routes = {
+  'GET /api/me': async (req, user) => {
+    const p = await profile(user.id);
+    return { email: user.email, coins: p.coins, owned: p.owned, ...spinInfo(p.last_spin), progress: p.progress ? cleanSave(p.progress, p.owned) : null };
+  },
+  // cloud save, both ways: send yours, get back whichever has more XP (and the cloud keeps that one)
+  'POST /api/progress': async (req, user) => {
+    const body = await readJson(req), p = await profile(user.id);
+    const mine = cleanSave(body.progress, p.owned), cloud = p.progress ? cleanSave(p.progress, p.owned) : null;
+    const keep = cloud ? mergeProgress(mine, cloud) : mine;
+    if (keep === mine) await sb(`/rest/v1/profiles?id=eq.${user.id}`, { method: 'PATCH', body: { progress: forStorage(mine) }, prefer: 'return=minimal' });
+    return { progress: keep, kept: keep === mine ? 'yours' : 'cloud' };
+  },
+  'POST /api/spin': async (req, user) => {
+    const p = await profile(user.id), st = spinInfo(p.last_spin);
+    if (!st.spinReady) throw new HttpError(429, 'Your free spin is not ready yet', st);
+    const reward = pickSpin(randomInt(0, 2 ** 32) / 2 ** 32, p.owned);
+    const rows = await rpc('claim_spin', { uid: user.id, reward_coins: reward.coins, reward_item: reward.item, cooldown: `${SPIN_COOLDOWN_MS / 1000} seconds` });
+    if (!rows?.length) throw new HttpError(429, 'Your free spin is not ready yet', spinInfo(Date.now())); // lost a race with another click
+    return { reward, coins: rows[0].coins, owned: rows[0].owned, ...spinInfo(rows[0].last_spin) };
+  },
+  'POST /api/buy': async (req, user) => {
+    const { item } = await readJson(req), p = await profile(user.id);
+    const check = buyCheck(item, p.coins, p.owned);
+    if (check.error) throw new HttpError(check.error === 'Unknown item' ? 400 : 409, check.error);
+    const rows = await rpc('buy_item', { uid: user.id, item, price: check.price });
+    if (!rows?.length) throw new HttpError(409, 'Not enough coins, or already owned');
+    return { coins: rows[0].coins, owned: rows[0].owned };
+  },
+  'POST /api/checkout': async (req, user) => {
+    if (!paymentsOn) throw new HttpError(503, 'Payments are not configured on this server');
+    const pack = packById((await readJson(req)).pack);
+    if (!pack) throw new HttpError(400, 'Unknown coin pack');
+    await profile(user.id); // purchases reference the profile, so make sure it exists before taking money
+    const site = siteUrl(req);
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      line_items: [{ quantity: 1, price_data: { currency: 'usd', unit_amount: pack.cents, product_data: { name: `${pack.coins} Spud Brawl coins` } } }],
+      client_reference_id: user.id,
+      customer_email: user.email || undefined,
+      metadata: { uid: user.id, pack: pack.id, coins: String(pack.coins) }, // set here, signed by Stripe on the way back
+      success_url: `${site}/?checkout=success`,
+      cancel_url: `${site}/?checkout=cancel`,
+    });
+    return { url: session.url };
+  },
+};
+// SITE_URL pins the redirect host; otherwise use the host this request came in on (Render sets x-forwarded-proto)
+function siteUrl(req) {
+  if (env.SITE_URL) return env.SITE_URL.trim().replace(/\/+$/, '');
+  const proto = String(req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim();
+  return `${proto === 'https' ? 'https' : 'http'}://${req.headers.host}`;
+}
+
+// Stripe calls this after payment. Raw body + signature check, then credit once per checkout session.
+async function webhook(req, res) {
+  if (!stripe || !WEBHOOK_SECRET) return send(res, 503, { error: 'Payments are not configured on this server' });
+  const raw = await readBody(req, 512 * 1024);
+  let event;
+  try { event = stripe.webhooks.constructEvent(raw, req.headers['stripe-signature'] || '', WEBHOOK_SECRET); }
+  catch { return send(res, 400, { error: 'Bad signature' }); }
+  const s = event.data?.object;
+  const paidEvent = event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded';
+  if (!paidEvent || s?.payment_status !== 'paid') return send(res, 200, { received: true, ignored: true });
+  if (!accountsOn) return send(res, 503, NOT_CONFIGURED); // Stripe retries for days, so nothing is lost while this is fixed
+  const uid = s.metadata?.uid, coins = Number(s.metadata?.coins);
+  if (!UUID.test(uid || '') || !COIN_PACKS.some(p => p.coins === coins)) {
+    console.error('webhook: session without our metadata', s.id); return send(res, 200, { received: true, ignored: true });
+  }
+  const credited = await rpc('credit_purchase', { session_id: s.id, uid, add_coins: coins, paid: s.amount_total ?? null, cur: s.currency ?? null });
+  return send(res, 200, { received: true, credited });
+}
+
+// Handles any /api/... request.
+export async function handleApi(req, res) {
+  const path = new URL(req.url, 'http://x').pathname;
+  try {
+    if (path === '/api/config') {
+      if (req.method !== 'GET') return send(res, 405, { error: 'Use GET' });
+      if (!accountsOn) return send(res, 200, { accounts: false, payments: false, ...NOT_CONFIGURED });
+      return send(res, 200, { accounts: true, supabaseUrl: SB_URL, supabaseAnonKey: ANON, payments: paymentsOn, packs: paymentsOn ? COIN_PACKS : [],
+        testMode: paymentsOn && env.STRIPE_SECRET_KEY.trim().startsWith('sk_test_') });
+    }
+    if (path === '/api/stripe/webhook') return req.method === 'POST' ? await webhook(req, res) : send(res, 405, { error: 'Use POST' });
+    const route = routes[`${req.method} ${path}`];
+    if (!route) return send(res, 404, { error: 'Not found' });
+    if (!accountsOn) return send(res, 503, NOT_CONFIGURED);
+    return send(res, 200, await route(req, await caller(req)));
+  } catch (e) {
+    if (e instanceof HttpError) return send(res, e.status, { error: e.message, ...e.extra });
+    console.error('api', path, e);
+    return send(res, 500, { error: 'Something went wrong, try again' });
+  }
+}

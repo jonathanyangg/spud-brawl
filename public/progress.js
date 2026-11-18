@@ -1,5 +1,6 @@
 // Saved progression: XP and levels, uniforms, weapon camos and attachments. Pure logic, no DOM.
 // Progress lives in this browser's localStorage, so it is per device and easy to edit; fine among friends.
+// Signed-in players also keep a cloud copy; coins and owned shop items live only on the server.
 import { WEAPONS, THROWABLES } from './config.js';
 const N = WEAPONS.length;
 
@@ -27,7 +28,27 @@ export const LOOKS = {
   royal:    { name: 'Royal',      pattern: 'blotch',  colors: ['#4b2a7a', '#2f1a52', '#c9a227', '#6a3fa8'] },
   gold:     { name: 'Gold',       pattern: 'metal',   colors: ['#f6d26b', '#b8860b'] },
   nebula:   { name: 'Nebula',     pattern: 'nebula',  colors: ['#1a0f2e', '#7b3fe4', '#e040fb', '#40c4ff'] },
+  // premium: coin shop or daily spin only (see PREMIUM)
+  hazard:   { name: 'Hazard',     pattern: 'tiger',   colors: ['#f2c230', '#141414'] },
+  toxic:    { name: 'Toxic',      pattern: 'digital', colors: ['#1d2a12', '#7cff3a', '#3d6b1a', '#b6ff7a'] },
+  cherry:   { name: 'Cherry',     pattern: 'blotch',  colors: ['#f6d4dc', '#e88aa6', '#c2456b', '#fff4f6'] },
+  carbon:   { name: 'Carbon',     pattern: 'digital', colors: ['#2a2c30', '#1a1b1e', '#3a3d42', '#0d0e10'] },
+  glacier:  { name: 'Glacier',    pattern: 'metal',   colors: ['#d8f3ff', '#5fb4e0'] },
+  spud:     { name: 'Golden Spud', pattern: 'metal',  colors: ['#e8b85c', '#8a5a1e'] },
+  lucky:    { name: 'Lucky',      pattern: 'blotch',  colors: ['#2f8f3a', '#1d5e26', '#f6d26b', '#7fd36b'] },
 };
+// Premium looks never unlock by level or kills: they are bought with coins (server-side) or won on the free daily spin.
+// price 0 = spin only, never for sale. Owned ids come from the server's profile.
+export const PREMIUM = {
+  hazard:  { kind: 'uniform', price: 600 },
+  toxic:   { kind: 'uniform', price: 900 },
+  cherry:  { kind: 'camo',    price: 500 },
+  carbon:  { kind: 'camo',    price: 700 },
+  glacier: { kind: 'camo',    price: 1200 },
+  spud:    { kind: 'uniform', price: 0 },
+  lucky:   { kind: 'camo',    price: 0 },
+};
+export const premiumOf = kind => Object.keys(PREMIUM).filter(id => PREMIUM[id].kind === kind);
 // uniforms unlock by level: [look, level]
 export const UNIFORMS = [['olive', 1], ['woodland', 3], ['desert', 6], ['urban', 10], ['arctic', 14], ['night', 18], ['tiger', 24], ['blaze', 30], ['royal', 38], ['gold', 50]];
 // gun camos unlock per weapon: [look, kills, headshots]; nebula needs gold on any three weapons
@@ -42,12 +63,16 @@ export const ATTACH = {
 
 const fill = v => Array.from({ length: N }, () => (typeof v === 'function' ? v() : v));
 export const newProgress = () => ({ xp: 0, wk: fill(0), wh: fill(0), uniform: 'olive', camo: fill('factory'), att: fill(() => []),
-  loadout: [0, 1, 2], nade: 'frag', matches: 0, wins: 0, fresh: 0, bestAim: 0 });
-// localStorage is user-editable: keep only well-formed values
-export function loadProgress(raw) {
+  loadout: [0, 1, 2], nade: 'frag', matches: 0, wins: 0, fresh: 0, bestAim: 0, owned: [] });
+const cleanOwned = v => (Array.isArray(v) ? [...new Set(v)].filter(id => Object.hasOwn(PREMIUM, id)) : []);
+// localStorage is user-editable: keep only well-formed values.
+// owned: the server's list of premium items; when given it replaces whatever the save claims.
+export function loadProgress(raw, owned) {
   const p = newProgress(); let o = null;
   try { o = JSON.parse(raw); } catch (e) {}
+  if (owned !== undefined) p.owned = cleanOwned(owned);
   if (!o || typeof o !== 'object') return p;
+  if (owned === undefined) p.owned = cleanOwned(o.owned); // a local cache of what the server said; cosmetic only
   const n = v => (Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
   p.xp = n(o.xp); p.matches = n(o.matches); p.wins = n(o.wins); p.fresh = n(o.fresh); p.bestAim = n(o.bestAim);
   for (let i = 0; i < N; i++) { p.wk[i] = n(o.wk?.[i]); p.wh[i] = n(o.wh?.[i]); }
@@ -65,7 +90,8 @@ export function loadProgress(raw) {
 }
 
 export const level = p => levelInfo(p.xp).level;
-export const uniformUnlocked = (p, id) => UNIFORMS.some(([u, l]) => u === id && level(p) >= l);
+const owns = (p, id, kind) => Object.hasOwn(PREMIUM, id) && PREMIUM[id].kind === kind && (p.owned || []).includes(id);
+export const uniformUnlocked = (p, id) => UNIFORMS.some(([u, l]) => u === id && level(p) >= l) || owns(p, id, 'uniform');
 export const attachUnlocked = (p, id) => Object.hasOwn(ATTACH, id) && level(p) >= ATTACH[id].level;
 export const weaponUnlocked = (p, i) => Number.isInteger(i) && i >= 0 && i < N && level(p) >= WEAPONS[i].level;
 export const throwableUnlocked = (p, id) => Object.hasOwn(THROWABLES, id) && level(p) >= THROWABLES[id].level;
@@ -73,19 +99,30 @@ export const throwableUnlocked = (p, id) => Object.hasOwn(THROWABLES, id) && lev
 const hsNeed = (wi, hs) => (WEAPONS[wi].noHead ? 0 : hs);
 const isGold = (p, wi) => p.wk[wi] >= 250 && p.wh[wi] >= hsNeed(wi, 50);
 export function camoUnlocked(p, wi, id) {
+  if (owns(p, id, 'camo')) return true; // a bought camo fits every weapon
   const c = CAMOS.find(c => c[0] === id); if (!c) return false;
   if (id === 'nebula') return WEAPONS.filter((w, i) => isGold(p, i)).length >= 3;
   return p.wk[wi] >= c[1] && p.wh[wi] >= hsNeed(wi, c[2]);
 }
 // the next step toward a camo, for the Armory
 export function camoNeed(p, wi, id) {
-  const c = CAMOS.find(c => c[0] === id);
+  const c = CAMOS.find(c => c[0] === id); if (!c) return '';
   if (id === 'nebula') return 'Gold on any three weapons';
   const parts = [];
   if (p.wk[wi] < c[1]) parts.push(`${p.wk[wi]}/${c[1]} kills`);
   if (p.wh[wi] < hsNeed(wi, c[2])) parts.push(`${p.wh[wi]}/${c[2]} headshots`);
   return parts.join(', ');
 }
+
+// The server's owned list changed (sign-in, purchase, spin, sign-out): take it, and drop equipped looks you no longer own.
+export function setOwned(p, owned) {
+  p.owned = cleanOwned(owned);
+  if (!uniformUnlocked(p, p.uniform)) p.uniform = 'olive';
+  for (let i = 0; i < N; i++) if (!camoUnlocked(p, i, p.camo[i])) p.camo[i] = 'factory';
+  return p;
+}
+// Cloud save merge: keep the save with more XP; a tie keeps a (the newer edit, e.g. an Armory change).
+export const mergeProgress = (a, b) => (b.xp > a.xp ? b : a);
 
 function unlockLabels(p) {
   const out = new Map();

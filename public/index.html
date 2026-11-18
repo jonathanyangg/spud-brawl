@@ -61,6 +61,28 @@
         </div>
         <button class="btn ghost small" id="armBtn" type="button">Armory <span class="newtag" id="armNew" hidden></span></button>
       </div>
+      <!-- accounts: stays hidden unless the server has Supabase configured (see SETUP.md) -->
+      <div class="account" id="acct" hidden>
+        <div id="acctOut">
+          <label for="acctEmail">Sign in to save progress on any device and get a free daily spin</label>
+          <div class="acctrow">
+            <input type="email" id="acctEmail" autocomplete="email" placeholder="you@example.com" spellcheck="false">
+            <button class="btn ghost small" id="acctSend" type="button">Email me a link</button>
+          </div>
+        </div>
+        <div id="acctIn" hidden>
+          <div class="acctrow">
+            <div class="who"><b id="acctName"></b><small id="acctEmailOut"></small></div>
+            <div class="coins" id="acctCoins" aria-live="polite"></div>
+          </div>
+          <div class="acctrow">
+            <button class="btn ghost small" id="spinBtn" type="button">Free spin</button>
+            <button class="btn ghost small" id="coinBtn" type="button" hidden>Get coins</button>
+            <button class="btn ghost small" id="acctOutBtn" type="button">Sign out</button>
+          </div>
+        </div>
+        <p class="help" id="acctMsg" aria-live="polite"></p>
+      </div>
       <div class="form">
         <div class="row">
           <label for="nameIn">Callsign</label>
@@ -207,6 +229,34 @@
       <p class="help" id="armMsg" aria-live="polite"></p>
       <div class="actions">
         <button class="btn" id="armDone" type="button">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="spinOv" hidden>
+    <div class="card" role="dialog" aria-modal="true" aria-labelledby="spinTitle">
+      <h2 id="spinTitle">Daily spin</h2>
+      <p class="help">One free spin every 24 hours. Spins are never sold.</p>
+      <div class="wheelbox"><div class="pointer" aria-hidden="true"></div><div id="wheel" aria-hidden="true"></div></div>
+      <p class="help" id="spinWhen"></p>
+      <p id="spinMsg" aria-live="polite"></p>
+      <details class="odds"><summary>Odds</summary><ul id="spinOdds"></ul></details>
+      <div class="actions">
+        <button class="btn" id="spinGo" type="button">Spin</button>
+        <button class="btn ghost" id="spinDone" type="button">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="coinOv" hidden>
+    <div class="card" role="dialog" aria-modal="true" aria-labelledby="coinTitle">
+      <h2 id="coinTitle">Get coins</h2>
+      <p class="help">Coins buy named looks in the Armory. You always see exactly what you get before you buy it.</p>
+      <div class="packs" id="coinPacks"></div>
+      <p class="help" id="coinTest" hidden>Test mode: pay with card 4242 4242 4242 4242, any future date, any CVC. No real money moves.</p>
+      <p class="help" id="coinMsg" aria-live="polite"></p>
+      <div class="actions">
+        <button class="btn ghost" id="coinDone" type="button">Done</button>
       </div>
     </div>
   </div>

@@ -9,12 +9,17 @@ Arena shooter in the browser (three.js). Play vs bots, or online with friends in
 ```
 npm install
 npm start        # http://localhost:3000
-npm test         # progression logic + relay self-check
+npm test         # progression + economy logic, relay, /api, headless browser
 ```
+
+`npm test` runs the game in headless Chromium if Playwright is installed (skipped otherwise). three.js comes from
+cdnjs; where that host is blocked, point `THREE_JS` at a local r128 `three.min.js`.
 
 ## Layout
 
 - `server.js`: serves `public/` and relays player state between everyone in a room over a WebSocket at `/ws`. No game logic lives on the server.
+- `api.js`: accounts, coins, daily spin, shop, Stripe Checkout and webhook, cloud save (`/api/...`; off until configured, see [SETUP.md](SETUP.md))
+- `supabase/schema.sql`: the database (profiles, purchases, row level security, atomic spin/buy/credit functions)
 - `public/game.js`: the game (rendering, physics, bots, HUD, online sync)
 - `public/net.js`: WebSocket client, auto-reconnects
 - `public/world.js`: maps (every solid thing is a box), textures, spawn points
@@ -23,7 +28,9 @@ npm test         # progression logic + relay self-check
 - `public/music.js`: generated soundtrack (a menu theme and a match theme, Web Audio, no files)
 - `public/progress.js`: XP, levels, unlock rules and attachment stats (pure logic, tested by `npm test`)
 - `public/skins.js`: camo patterns drawn on a canvas, used on soldiers, guns and Armory swatches
-- `public/armory.js`: the Armory screen
+- `public/armory.js`: the Armory screen (and the coin shop's looks when signed in)
+- `public/economy.js`: spin table, cooldown, coin packs, buy rules (pure logic, shared by server and client, tested)
+- `public/account.js`: sign-in panel, coin balance, spin wheel, coin packs, cloud sync
 
 ## Controls
 
@@ -47,7 +54,18 @@ Every kill earns XP (more for headshots, frags and streaks), and every finished 
 
 Pick them in the **Armory** from the main menu. The menu shows your level, XP bar and how many unlocks you haven't looked at yet.
 
-Progress is saved in this browser's localStorage (key `spudbrawl-progress`). There are no accounts: a different browser or device starts from level 1, and clearing site data resets it.
+Progress is saved in this browser's localStorage (key `spudbrawl-progress`). Without an account, a different browser or device starts from level 1, and clearing site data resets it.
+
+## Accounts, coins and the shop
+
+Off by default; [SETUP.md](SETUP.md) lists the steps and env vars that switch them on. Once on:
+
+- **Sign in** from the menu with your email (a magic link, no password). Your progress syncs to the cloud: on sign-in the save with more XP wins on both sides.
+- **Coins** buy named, coin-only looks in the Armory: Hazard and Toxic uniforms, Cherry, Carbon and Glacier camos (a bought camo fits every weapon). Friends see them online.
+- **Daily spin**: one free spin every 24 hours for coins or a spin-only look (Golden Spud uniform, Lucky camo). Spins are never sold, and the odds are shown on the wheel.
+- **Get coins**: three coin packs through Stripe Checkout.
+
+The server decides everything that touches coins: it checks your Supabase token on every call, picks spin prizes and prices, and writes through atomic Postgres functions. Coin packs are credited only by Stripe's signed webhook, once per payment.
 
 Music can be turned off in the menu; **M** mutes everything.
 
@@ -61,4 +79,4 @@ In Zombies, one player runs the zombies for the room (the lowest player id still
 
 ## Deploy
 
-Any host that runs a long-lived Node process with WebSockets works (Render, Railway, Fly). Build: `npm install`, start: `npm start`. It listens on `$PORT`.
+Any host that runs a long-lived Node process with WebSockets works (Render, Railway, Fly). Build: `npm install`, start: `npm start`. It listens on `$PORT`. Accounts and payments read `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` and optionally `SITE_URL` (see [SETUP.md](SETUP.md)).

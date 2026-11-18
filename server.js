@@ -1,10 +1,12 @@
 // Serves the game from ./public and relays presence between players in the same room over /ws.
 // The server keeps no game logic: clients own their own health and report their own deaths.
+// Accounts, coins and payments live under /api (api.js) and stay off until their env vars are set.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { join, extname, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
+import { handleApi } from './api.js';
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC = fileURLToPath(new URL('./public/', import.meta.url));
@@ -14,6 +16,7 @@ const GAMES = ['ffa', 'zombies', 'gungame', 'moon', 'snipe']; // aim trainer is 
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 
 const server = createServer(async (req, res) => {
+  if (req.url.startsWith('/api/')) return handleApi(req, res);
   try {
     const path = normalize(decodeURIComponent(new URL(req.url, 'http://x').pathname));
     const file = join(PUBLIC, path.endsWith('/') ? path + 'index.html' : path);

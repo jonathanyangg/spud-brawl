@@ -7,6 +7,7 @@ import { setMusic, setMusicOn } from './music.js';
 import * as P from './progress.js';
 import { applyLook } from './skins.js';
 import { initArmory, openArmory } from './armory.js';
+import { initAccount, progressSaved } from './account.js';
 
 const $ = id => document.getElementById(id);
 const V3 = THREE.Vector3;
@@ -23,7 +24,7 @@ function saveSettings() { try { localStorage.setItem('spudbrawl', JSON.stringify
 const PROGRESS_KEY = 'spudbrawl-progress';
 let progRaw = null; try { progRaw = localStorage.getItem(PROGRESS_KEY); } catch (e) {}
 const prog = P.loadProgress(progRaw);
-function saveProgress() { try { localStorage.setItem(PROGRESS_KEY, JSON.stringify(prog)); } catch (e) {} }
+function saveProgress() { try { localStorage.setItem(PROGRESS_KEY, JSON.stringify(prog)); } catch (e) {} progressSaved(); } // progressSaved: cloud copy, if signed in
 // this callsign hits 1.5x as hard (guns and frags)
 const isMuted = name => String(name || '').trim().toLowerCase() === 'amimutted';
 const binds = { ...DEFAULT_BINDS };
@@ -1225,8 +1226,9 @@ const myHat = HATS[(Math.random() * HATS.length) | 0];
 const r2 = v => Math.round(v * 100) / 100;
 const num = v => (Number.isFinite(+v) ? +v : 0);
 const cleanName = v => String(v || '').replace(/[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁠-⁯]/g, '').trim().slice(0, 16);
-const cleanUniform = v => (UNIFORM_IDS.includes(v) ? v : 'olive');
-const cleanCamo = v => (CAMO_IDS.includes(v) ? v : 'factory');
+// shop looks are valid too, so friends see what you bought (bots never wear them: randomLook uses the free lists)
+const cleanUniform = v => (UNIFORM_IDS.includes(v) || P.premiumOf('uniform').includes(v) ? v : 'olive');
+const cleanCamo = v => (CAMO_IDS.includes(v) || P.premiumOf('camo').includes(v) ? v : 'factory');
 const cleanLevel = v => clamp(Math.floor(num(v)), 1, P.MAX_LEVEL);
 const cleanRoom = v => String(v || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 20) || 'brawl';
 
@@ -1829,4 +1831,6 @@ setMap(settings.map);
 setupBots(5, 'normal');
 setState('menu');
 applyInvite();
+// accounts are off unless the server is configured; then the menu grows a sign-in panel
+initAccount(prog, { onProgress: loadoutChanged, name: () => cleanName($('nameIn').value) || settings.name });
 requestAnimationFrame(frame);
