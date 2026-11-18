@@ -24,6 +24,7 @@
       <div class="chip you"><small>You</small><span id="sYou">0</span></div>
       <div class="chip"><small>Top rival</small><span id="sLead">-</span></div>
       <div class="chip"><small>To win</small><span id="sGoal">20</span></div>
+      <div class="chip lv"><small>Lv</small><span id="sLv">1</span></div>
     </div>
     <div id="netStatus" hidden></div>
     <ul id="feed"></ul>
@@ -31,6 +32,8 @@
     <svg id="hitm" viewBox="0 0 30 30" aria-hidden="true"><g stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="3" y1="3" x2="10" y2="10"/><line x1="27" y1="3" x2="20" y2="10"/><line x1="3" y1="27" x2="10" y2="20"/><line x1="27" y1="27" x2="20" y2="20"/></g></svg>
     <div id="reloadTxt" hidden>Reloading</div>
     <div id="toast"></div>
+    <div id="xpPop" aria-hidden="true"></div>
+    <div id="banner" role="status" aria-live="polite"></div>
     <div id="hpbox" class="panel">
       <div class="lbl">Health</div>
       <div id="hpnum">100</div>
@@ -48,6 +51,14 @@
     <div class="menu-inner">
       <h1 class="title">Spud<br>Brawl</h1>
       <p class="tag">Free-for-all firefight. Sprint, slide and aim down sights. First to 20 eliminations wins.</p>
+      <div class="profile">
+        <div class="lvbadge" id="pLv" aria-label="Level 1">1</div>
+        <div class="pxp">
+          <div class="lbl"><span id="pLvName">Level 1</span><span id="pXp">0 / 600 XP</span></div>
+          <div class="bar"><div id="pXpBar"></div></div>
+        </div>
+        <button class="btn ghost small" id="armBtn" type="button">Armory <span class="newtag" id="armNew" hidden></span></button>
+      </div>
       <div class="form">
         <div class="row">
           <label for="nameIn">Callsign</label>
@@ -98,6 +109,13 @@
           <p class="help" id="onlineHelp">Everyone types the same room code, or opens your invite link, and presses Join room. A new room plays the map you picked.</p>
         </div>
         <div class="row">
+          <div class="lbl" id="musicLbl">Music</div>
+          <div class="seg" id="musicSeg" role="group" aria-labelledby="musicLbl">
+            <button type="button" data-v="true" aria-pressed="true">On</button>
+            <button type="button" data-v="false" aria-pressed="false">Off</button>
+          </div>
+        </div>
+        <div class="row">
           <label for="sensIn">Mouse sensitivity <span id="sensVal">1.0</span></label>
           <input type="range" id="sensIn" min="0.3" max="2.5" step="0.1" value="1">
         </div>
@@ -138,6 +156,18 @@
     </div>
   </div>
 
+  <div class="overlay" id="armory" hidden>
+    <div class="card" role="dialog" aria-modal="true" aria-labelledby="armTitle">
+      <h2 id="armTitle">Armory</h2>
+      <div class="seg" id="armTabs" role="tablist" aria-label="Armory sections"></div>
+      <div id="armBody" role="tabpanel"></div>
+      <p class="help" id="armMsg" aria-live="polite"></p>
+      <div class="actions">
+        <button class="btn" id="armDone" type="button">Done</button>
+      </div>
+    </div>
+  </div>
+
   <div class="overlay" id="death" hidden>
     <div class="card">
       <p class="lbl">Knocked out</p>
@@ -155,6 +185,11 @@
     <div class="card">
       <p class="lbl">Match over</p>
       <h2 id="overTitle">You win</h2>
+      <div id="overXp">
+        <div class="xpline"><b id="overGain">+0 XP</b><span id="overLv">Level 1</span></div>
+        <div class="bar"><div id="overBar"></div></div>
+        <ul id="overUnlocks"></ul>
+      </div>
       <table id="overTbl"></table>
       <div class="actions" style="justify-content:center">
         <button class="btn" id="againBtn" type="button">Play again</button>

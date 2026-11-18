@@ -47,8 +47,8 @@ export function loadProgress(raw) {
   if (!o || typeof o !== 'object') return p;
   const n = v => (Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
   p.xp = n(o.xp); p.matches = n(o.matches); p.wins = n(o.wins); p.fresh = n(o.fresh);
-  for (let i = 0; i < 3; i++) {
-    p.wk[i] = n(o.wk?.[i]); p.wh[i] = n(o.wh?.[i]);
+  for (let i = 0; i < 3; i++) { p.wk[i] = n(o.wk?.[i]); p.wh[i] = n(o.wh?.[i]); }
+  for (let i = 0; i < 3; i++) { // after all kill counts: nebula depends on every gun
     if (camoUnlocked(p, i, o.camo?.[i])) p.camo[i] = o.camo[i];
     if (Array.isArray(o.att?.[i])) p.att[i] = [...new Set(o.att[i])].filter(a => attachUnlocked(p, a)).slice(0, MAX_ATTACH);
   }

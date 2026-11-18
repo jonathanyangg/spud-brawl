@@ -7,7 +7,7 @@ Two maps: **Depot** (shipping containers, a gutted office, sniper decks, loading
 ```
 npm install
 npm start        # http://localhost:3000
-npm test         # relay self-check
+npm test         # progression logic + relay self-check
 ```
 
 ## Layout
@@ -18,12 +18,30 @@ npm test         # relay self-check
 - `public/world.js`: maps (every solid thing is a box), textures, spawn points
 - `public/config.js`: weapons, movement speeds, bot skill, default key bindings
 - `public/audio.js`: generated sound effects
+- `public/music.js`: generated soundtrack (a menu theme and a match theme, Web Audio, no files)
+- `public/progress.js`: XP, levels, unlock rules and attachment stats (pure logic, tested by `npm test`)
+- `public/skins.js`: camo patterns drawn on a canvas, used on soldiers, guns and Armory swatches
+- `public/armory.js`: the Armory screen
 
 ## Controls
 
 WASD move, Shift sprint, C crouch, Space jump, right-click aim down sights, 1/2/3 or wheel for SMG/Shotgun/Sniper, G frag, R reload. All rebindable under Controls.
 
 **Slide:** press crouch while sprinting. **Slide cancel:** press crouch again (or jump) mid-slide to pop straight back into a sprint with the slide's speed. Chain them to move faster than a plain sprint.
+
+## Progression
+
+Every kill earns XP (more for headshots, frags and streaks), and every finished match adds a bonus, bigger for a win. There are 55 levels.
+
+- **Uniforms** unlock as you level up and dress your soldier's legs and arms (other players see them online).
+- **Gun camos** unlock per weapon from kills and headshots with that gun: Woodland, Desert, Urban, Tiger, Crimson, Gold. Get Gold on all three guns for Nebula.
+- **Attachments** unlock by level; equip up to two per gun: Extended mag (+50% mag, slower reload), Laser sight (tighter hip fire), Suppressor (quiet shots, no muzzle flash, less range), Fast mag (30% faster reload).
+
+Pick them in the **Armory** from the main menu. The menu shows your level, XP bar and how many unlocks you haven't looked at yet.
+
+Progress is saved in this browser's localStorage (key `spudbrawl-progress`). There are no accounts: a different browser or device starts from level 1, and clearing site data resets it.
+
+Music can be turned off in the menu; **M** mutes everything.
 
 ## Online play
 
