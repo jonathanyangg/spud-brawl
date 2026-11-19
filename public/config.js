@@ -19,7 +19,7 @@ export const KNIFE = 5, SNIPER = 2;
 // the equipment slot: one throwable per loadout
 export const THROWABLES = { frag: { name: 'Frag', cd: 7, level: 1 }, stun: { name: 'Stun', cd: 9, level: 3 }, flash: { name: 'Flashbang', cd: 9, level: 5 } };
 // game types. Aim trainer is solo only.
-export const GAMES = { ffa: 'Free-for-all', zombies: 'Zombies', gungame: 'Gun Game', moon: 'Moon Knives', snipe: 'Snipers Only', aim: 'Aim Trainer' };
+export const GAMES = { ffa: 'Free-for-all', tdm: 'Team Deathmatch', br: 'Battle Royale', zombies: 'Zombies', gungame: 'Gun Game', moon: 'Moon Knives', snipe: 'Snipers Only', aim: 'Aim Trainer' };
 // gun game: two kills on each weapon, then one with the knife wins (AR, SMG, Shotgun, Sniper, RPG, Knife)
 export const GUNGAME = [3, 0, 1, 2, 4, 5];
 export const DIFF = {
@@ -28,10 +28,12 @@ export const DIFF = {
   hard:   { inacc: 0.028, react: 0.28, turn: 9,   dmg: 0.85 },
 };
 export const BOT_NAMES = ['Havoc', 'Rook', 'Bishop', 'Mako', 'Talon', 'Ridge', 'Kestrel', 'Onyx', 'Sable', 'Cinder'];
+// team deathmatch: team 0 and team 1
+export const TEAM_COLORS = ['#2f8fe0', '#e5432d'], TEAM_NAMES = ['Blue', 'Red'];
 export const HATS = ['#e5432d', '#2f8fe0', '#8cc63f', '#b45be0', '#f28c28', '#1fb5a8', '#e0559b', '#5a62e8'];
 export const PLAYER_COLOR = '#ffc83d';
 // names sent over the network by index: weapons, then throwables, then zombies
-export const WNAMES = [...WEAPONS.map(w => w.name), 'Frag', 'Stun', 'Flashbang', 'Zombie'];
+export const WNAMES = [...WEAPONS.map(w => w.name), 'Frag', 'Stun', 'Flashbang', 'Zombie', 'Storm'];
 
 // ---------- key bindings ----------
 // Every rebindable control maps to one KeyboardEvent.code, or 'Mouse0'..'Mouse4' for mouse buttons.

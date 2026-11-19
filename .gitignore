@@ -1,2 +1,4 @@
 node_modules
 .claude
+tools/out/
+.playwright-mcp/

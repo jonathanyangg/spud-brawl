@@ -1,6 +1,7 @@
 // Spud Brawl: a free-for-all arena shooter. three.js is loaded as a global by index.html.
-import { G, JUMP, R, H, EYE, STEP, SCORE_LIMIT, MOVE, WEAPONS, KNIFE, SNIPER, THROWABLES, GAMES, GUNGAME, DIFF, BOT_NAMES, HATS, PLAYER_COLOR, WNAMES, ACTIONS, DEFAULT_BINDS, validCode, keyName } from './config.js';
-import { MAPS, boxes, SPAWNS, STAIRS, boxGeo, loadMap, currentMap, HALF, LIMIT } from './world.js';
+import { G, JUMP, R, H, EYE, STEP, SCORE_LIMIT, MOVE, WEAPONS, KNIFE, SNIPER, THROWABLES, GAMES, GUNGAME, DIFF, BOT_NAMES, HATS, TEAM_COLORS, TEAM_NAMES, PLAYER_COLOR, WNAMES, ACTIONS, DEFAULT_BINDS, validCode, keyName } from './config.js';
+import { MAPS, boxes, SPAWNS, STAIRS, PADS, PAD_R, ICE, boxGeo, loadMap, currentMap, HALF, LIMIT } from './world.js';
+import { buildNav, navToward } from './nav.js';
 import { initAudio, sfxShot, sfx, toggleMute, setVolume } from './audio.js';
 import { joinRoom } from './net.js';
 import { setMusic, setMusicOn } from './music.js';
@@ -17,7 +18,8 @@ const UP = new V3(0, 1, 0);
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // ---------- settings ----------
-const settings = { name: 'Soldier', diff: 'normal', bots: 5, sens: 1, adsSens: 1, fov: 75, vol: 1, mode: 'bots', game: 'ffa', room: 'brawl', map: 'depot', music: true };
+const settings = { name: 'Soldier', diff: 'normal', bots: 5, sens: 1, adsSens: 1, fov: 75, vol: 1, mode: 'bots', game: 'ffa', room: 'brawl', map: 'depot', music: true,
+  ts: 4, lim: 25, side: 'together', pub: true }; // ts: players a side and lim: score to win (team deathmatch); pub: list my room
 try { Object.assign(settings, JSON.parse(localStorage.getItem('spudbrawl') || '{}')); } catch (e) {}
 function saveSettings() { try { localStorage.setItem('spudbrawl', JSON.stringify(settings)); } catch (e) {} }
 // progression (XP, unlocks, loadout) is saved per browser, separately from settings
@@ -145,7 +147,22 @@ function moveEntity(e, dt) {
     if (e.vel.y <= 0 && e.pos.y > b.max.y - 0.7) { e.pos.y = b.max.y; e.vel.y = 0; e.onGround = true; }
     else if (e.vel.y > 0) { e.pos.y = b.min.y - H * poseK(e) - 0.001; e.vel.y = 0; }
   }
+  const lim = LIMIT - R; e.pos.x = clamp(e.pos.x, -lim, lim); e.pos.z = clamp(e.pos.z, -lim, lim); // never over the boundary wall
+  if (e.onGround) {
+    e.launched = false;
+    for (const pd of PADS) if (Math.abs(e.pos.y - pd.y) < 0.3 && Math.hypot(e.pos.x - pd.x, e.pos.z - pd.z) < PAD_R) { launch(e, pd); break; }
+  }
 }
+// a jump pad: an arc that peaks `arc` above the landing spot and comes down on it; steering in the air is weak
+// until you land, so you get there without touching anything
+function launch(e, pd) {
+  const g = grav(), vy = Math.sqrt(2 * g * (pd.ty - e.pos.y + pd.arc)), t = vy / g + Math.sqrt(2 * pd.arc / g);
+  e.vel.set((pd.tx - e.pos.x) / t, vy, (pd.tz - e.pos.z) / t); e.onGround = false; e.launched = true;
+  if (e.slide > 0) e.slide = 0;
+  if (e === player) sfx.pad();
+}
+// how much grip the ground gives: 1 normally, a lot less on ice
+const grip = e => (e.onGround && e.pos.y < 0.1 && ICE.some(([x0, x1, z0, z1]) => e.pos.x > x0 && e.pos.x < x1 && e.pos.z > z0 && e.pos.z < z1) ? 0.14 : 1);
 
 // ---------- soldiers ----------
 // Built from boxes, facing -z, feet at y = 0. Legs pivot at the hips and knees; the upper body
@@ -323,20 +340,35 @@ function newEntity(name, color, isPlayer, guns = WEAPONS) {
     crouch: 0, slideK: 0, slide: 0, slideReady: 0, slideDir: new V3(), sprint: false, sprintBlock: 0, stunUntil: 0, blindUntil: 0, nade: 'frag',
     remote: false, peer: null, m: 1 };
 }
-function setupBots(n, diff) {
+// teams: the team of each bot (team deathmatch), or nothing
+function setupBots(n, diff, teams) {
   for (const e of ents) if (e.mesh) scene.remove(e.mesh);
   ents.length = 0; ents.push(player);
-  const names = BOT_NAMES.slice().sort(() => Math.random() - 0.5);
-  for (let i = 0; i < n; i++) {
-    const b = newEntity(names[i], HATS[i % HATS.length], false);
-    b.mesh = soldierMesh(b.name, b.color, true, randomLook());
-    b.ai = { d: DIFF[diff], target: null, visible: false, reactAt: 0, nextScan: 0, strafeDir: 1, strafeSwitch: 0, goal: null, goalExpire: 0,
-      lastSeen: new V3(), lastSeenAt: -99, stuckAt: 0, lastPos: new V3(), stuck: 0, aimH: 1.3, nextJump: 0, burst: 4, burstPause: 0 };
-    ents.push(b); respawn(b);
-  }
+  for (let i = 0; i < n; i++) makeBot(teams ? teams[i] : undefined, diff);
+}
+// bid: the bot's id, the same on every screen online (kept when another player takes the bots over)
+let botSeq = 0;
+function makeBot(team, diff, name = freeBotName(), bid = ++botSeq) {
+  botSeq = Math.max(botSeq, bid);
+  const b = newEntity(name, team === undefined ? HATS[bid % HATS.length] : TEAM_COLORS[team], false);
+  b.bid = bid; b.team = team;
+  b.mesh = soldierMesh(b.name, b.color, true, randomLook());
+  b.ai = { d: DIFF[diff] || DIFF.normal, target: null, visible: false, reactAt: 0, nextScan: 0, strafeDir: 1, strafeSwitch: 0, goal: null, goalExpire: 0,
+    lastSeen: new V3(), lastSeenAt: -99, stuckAt: 0, lastPos: new V3(), stuck: 0, aimH: 1.3, nextJump: 0, burst: 4, burstPause: 0 };
+  ents.push(b); respawn(b);
+  return b;
+}
+function freeBotName() {
+  const used = new Set(ents.map(e => e.name)), free = BOT_NAMES.filter(n => !used.has(n));
+  if (free.length) return pick(free);
+  for (let i = 2; ; i++) { const n = `${pick(BOT_NAMES)} ${i}`; if (!used.has(n)) return n; }
+}
+function removeBot(b) {
+  if (b.team !== undefined) teams.bank[b.team] += b.kills; // their kills still count for the team
+  scene.remove(b.mesh); ents.splice(ents.indexOf(b), 1); leaderCache = null;
 }
 function pickSpawn(e) {
-  const others = ents.filter(o => o !== e && o.alive);
+  const others = ents.filter(o => o !== e && o.alive && !sameTeam(o, e)); // as far from enemies as we can
   let best = null, bestD = -1;
   for (let i = 0; i < 5; i++) {
     const s = SPAWNS[(Math.random() * SPAWNS.length) | 0];
@@ -370,8 +402,34 @@ function gunsFor(e) {
   if (e.isPlayer) return P.loadoutWeapons(prog);
   return [0, 1, 2, 3].sort(() => Math.random() - 0.5).slice(0, 3).map(i => WEAPONS[i]);
 }
-const scoreLimit = () => (game === 'gungame' ? GUNGAME.length * 2 - 1 : SCORE_LIMIT);
+const scoreLimit = () => (game === 'gungame' ? GUNGAME.length * 2 - 1 : game === 'tdm' ? cfg().lim : SCORE_LIMIT);
+// team deathmatch: everyone has a team (0 or 1); teammates can't hurt each other
+const teamsOn = () => game === 'tdm';
+const sameTeam = (a, b) => teamsOn() && a !== b && a.team !== undefined && a.team === b.team;
+// the match settings: the room's online, the menu's offline
+const cfg = () => (mode === 'online' && net.cfg ? net.cfg : { bots: settings.bots, diff: settings.diff, ts: settings.ts, lim: settings.lim, side: settings.side });
+// team scores: every soldier's kills plus the kills of bots that have left (bank). Online the bot host adds them up.
+const teams = { bank: [0, 0] };
+function teamScore() {
+  if (mode === 'online' && !botHost() && net.tscore) return net.tscore;
+  const s = [...teams.bank];
+  for (const e of ents) if ((e.team === 0 || e.team === 1) && (!e.remote || e.netbot || e.m === net.m)) s[e.team] += e.kills;
+  return s;
+}
+// who has won, if anyone: a soldier, or { name, team } for a team
+function winnerNow() {
+  if (!versus()) return null;
+  if (oneLife()) { // last one standing, once there were at least two
+    const field = ents.filter(e => !e.zombie && (!e.remote || e.netbot || e.m === net.m)), up = field.filter(e => (e.remote && !e.netbot ? !e.dead : e.alive));
+    return field.length >= 2 && up.length <= 1 ? up[0] || player : null;
+  }
+  if (teamsOn()) { const s = teamScore(), lim = scoreLimit(); return s[0] >= lim ? { name: 'Blue team', team: 0 } : s[1] >= lim ? { name: 'Red team', team: 1 } : null; }
+  return ents.find(e => !e.zombie && (!e.remote || e.netbot || e.m === net.m) && e.kills >= scoreLimit()) || null;
+}
+// how other screens name a soldier in events: a player's id, 'b' + a bot's id, or '' for nobody
+const idOf = e => (!e ? '' : e.isPlayer ? net.myPeer : e.remote ? e.peer : e.bid ? 'b' + e.bid : '');
 const versus = () => game !== 'zombies' && game !== 'aim';
+const oneLife = () => game === 'br';
 const nadesOn = () => game === 'ffa' || game === 'zombies';
 // gun game: after a kill, move up to the next weapon on the ladder
 function gunGameStep(e) {
@@ -425,13 +483,14 @@ function tryFire(e) {
     const muzzle = muzzlePos(e), acc = new Map(), ends = [];
     for (let i = 0; i < w.pellets; i++) ends.push(hitscan(e, _o, spreadDir(_f, spread), w, muzzle, acc));
     if (e.isPlayer && game === 'aim') { AIM.shots++; if (acc.aimHit) AIM.hits++; }
-    if (e.isPlayer && mode === 'online') {
-      const flat = []; if (!melee) ends.slice(0, 3).forEach(h => flat.push(r2(h.x), r2(h.y), r2(h.z)));
-      netEvent('s', w.id, ...flat);
+    if (mode === 'online' && (e.isPlayer || e.ai)) {
+      // others see my shots from my events; the bots I run show theirs as a flag in their state
+      if (e.isPlayer) { const flat = []; if (!melee) ends.slice(0, 3).forEach(h => flat.push(r2(h.x), r2(h.y), r2(h.z))); netEvent('s', w.id, ...flat); }
+      else e.fired = true;
       for (const [t, a] of acc) {
         t.hp -= a.dmg;
-        netEvent('h', t.peer, Math.round(a.dmg * 10) / 10, a.head ? 1 : 0, w.id);
-        hitMarker(a.head, t.hp <= 0); a.head ? sfx.head() : sfx.hit();
+        netEvent('h', t.peer, Math.round(a.dmg * 10) / 10, a.head ? 1 : 0, w.id, e.ai ? idOf(e) : '');
+        if (e.isPlayer) { hitMarker(a.head, t.hp <= 0); a.head ? sfx.head() : sfx.hit(); }
       }
     }
   }
@@ -448,7 +507,7 @@ function hitscan(shooter, o, d, w, muzzle, acc) {
   const melee = w.kind === 'melee', pad = melee ? 0.3 : 0;
   let best = rayWorld(o, d, w.range), target = null, zone = null, aimHit = null;
   for (const t of ents) {
-    if (t === shooter || !t.alive || (game === 'zombies' && !t.zombie && !shooter.zombie)) continue; // no friendly fire in co-op
+    if (t === shooter || !t.alive || (game === 'zombies' && !t.zombie && !shooter.zombie) || sameTeam(t, shooter)) continue; // no friendly fire
     const k = poseK(t);
     for (const [y, r, z] of HITS) {
       const th = raySphere(o, d, _h.set(t.pos.x, t.pos.y + y * k, t.pos.z), r + pad);
@@ -481,7 +540,7 @@ function damage(t, amt, src, wname, head, pt) {
   if (pt) burst(pt, BLOOD, head ? 6 : 3, 3, 0.07, 0.5);
   if (src && src.isPlayer && t !== src) { hitMarker(head, t.hp <= 0); head ? sfx.head() : sfx.hit(); }
   if (t.isPlayer) { sfx.hurt(); if (src && src !== t) { dmgFrom = src; dmgT = 1; } shake = Math.max(shake, 0.12); }
-  if (t.ai && src && src !== t && src.alive) {
+  if (t.ai && src && src !== t && src.alive && !sameTeam(src, t)) {
     const ai = t.ai;
     if (!ai.visible || ai.target !== src) { ai.target = src; ai.reactAt = now + ai.d.react * 0.6; ai.lastSeen.copy(src.pos); ai.lastSeenAt = now; ai.goal = null; }
   }
@@ -496,20 +555,24 @@ function kill(t, src, wname, head) {
   bodyC(t, _b); burst(_b, [...BLOOD, new THREE.Color(t.color).getHex()], 14, 5, 0.1, 0.9);
   corpse(t);
   if (t.mesh) t.mesh.visible = false;
-  t.respawnAt = t.isPlayer && game === 'zombies' ? Infinity : now + (t.isPlayer ? 4 : 3); // zombies: back next wave
+  t.respawnAt = (t.isPlayer && game === 'zombies') || oneLife() ? Infinity : now + (t.isPlayer ? 4 : 3); // zombies: back next wave
+  if (!self) killReward(src);
   if (t.isPlayer) {
     deathPos.copy(camera.position); killer = self ? null : src;
-    $('deathBy').textContent = self ? `Killed by your own ${wname === 'RPG' ? 'rocket' : wname.toLowerCase()}` : 'Killed by ' + src.name;
-    $('deathHow').textContent = self ? 'Aim it a little further away.' : wname + (head ? ' \u00b7 headshot' : '');
+    $('deathBy').textContent = wname === 'Storm' ? 'The storm got you' : self ? `Killed by your own ${wname === 'RPG' ? 'rocket' : wname.toLowerCase()}` : 'Killed by ' + src.name;
+    $('deathHow').textContent = wname === 'Storm' ? 'Stay inside the circle.' : self ? 'Aim it a little further away.' : wname + (head ? ' \u00b7 headshot' : '');
+    if (oneLife()) $('deathHow').textContent += ` \u00b7 you placed #${brAlive().length + 1}`;
     $('death').hidden = false; $('scope').hidden = true;
   }
   if (src && src.isPlayer && !self) { sfx.kill(); toast(`Eliminated <em></em>`, t.name, head); if (state === 'playing') awardKill(wname, head); }
-  if (t.isPlayer && mode === 'online') netEvent('x', src && src.remote ? src.peer : '', WNAMES.indexOf(wname), head ? 1 : 0);
+  if (t.isPlayer && mode === 'online') netEvent('x', self ? '' : idOf(src), WNAMES.indexOf(wname), head ? 1 : 0);
+  if (t.ai && mode === 'online') netEvent('bx', t.bid, self ? '' : idOf(src), WNAMES.indexOf(wname), head ? 1 : 0); // a bot I run went down
   leaderCache = null; updateScoreTop();
   if (mode === 'online') checkWinOnline();
-  else if (!self && versus() && src.kills >= scoreLimit()) {
-    if (state === 'playing') endGame(src);
-    else ents.forEach(e => { e.kills = 0; e.deaths = 0; });
+  else if (!self || oneLife()) { // in battle royale the storm can decide it too
+    const w = winnerNow(); if (!w) return;
+    if (state === 'playing') endGame(w);
+    else { ents.forEach(e => { e.kills = 0; e.deaths = 0; }); teams.bank = [0, 0]; } // the bots brawling behind the menu start over
   }
 }
 
@@ -583,7 +646,8 @@ function detonate(n) {
 function appliesHere(t, owner) {
   if (!t.alive || t.remote) return false;
   if (game === 'zombies' && !t.zombie && owner !== t && !owner.zombie) return false;
-  return t === player || t.zombie || !owner.remote;
+  if (sameTeam(t, owner)) return false;
+  return t === player || t.zombie || !!t.ai || !owner.remote; // remote players' blasts reach the bots I run
 }
 const blastVol = pos => (state === 'playing' ? clamp(1 - pos.distanceTo(camera.position) / 70, 0.15, 1) : 0);
 function explode(pos, owner, wname, maxDmg, RAD) {
@@ -648,10 +712,13 @@ function stairWaypoint(e, goal) {
   const dy = goal.y - e.pos.y; if (Math.abs(dy) < 1.5) return null;
   const up = dy > 0; let best = null, bs = Infinity;
   for (const st of STAIRS) {
+    if (st.pad && !up) continue; // jump pads only go up; to get down, walk off the edge
+    if (up && st.y1 > goal.y + 1.5) continue; // overshoots: we'd only have to come back down
     if (Math.abs(e.pos.y - (up ? st.y0 : st.y1)) > 1) continue;
     if (up && goal.y - st.y1 > 1.5 && !STAIRS.some(o => o !== st && Math.abs(o.y0 - st.y1) < 0.3)) continue; // dead end below the goal
-    const [ex, ez] = up ? st.foot : st.top;
-    const score = Math.hypot(ex - e.pos.x, ez - e.pos.z) + 10 * Math.abs(goal.y - (up ? st.y1 : st.y0));
+    // the walk to these stairs plus the walk from where they come out to the goal (so we take the flight that leads there)
+    const [ex, ez] = up ? st.foot : st.top, [ox, oz] = up ? st.top : st.foot;
+    const score = Math.hypot(ex - e.pos.x, ez - e.pos.z) + Math.hypot(goal.x - ox, goal.z - oz) + 10 * Math.abs(goal.y - (up ? st.y1 : st.y0));
     if (score < bs) { bs = score; best = st; }
   }
   if (!best) return null;
@@ -665,6 +732,15 @@ function stairWaypoint(e, goal) {
   }
   return { x: ex, z: ez };
 }
+// on the ground with something in the way: follow the ground grid round it
+let nav = null, navMap = null;
+function navPoint(e, wp) {
+  // the grid keeps a body's width off walls, so follow it unless the spot is right there (a straight ray can
+  // slip past a corner that the body then snags on)
+  if (e.climb || e.pos.y > 0.6 || (Math.hypot(wp.x - e.pos.x, wp.z - e.pos.z) < 2 && clearTo(e, wp.x, wp.z))) return wp;
+  if (navMap !== currentMap) { nav = buildNav(boxes, LIMIT, R, STEP, H, PADS.filter(p => p.y < 0.6).map(p => ({ x: p.x, z: p.z, r: PAD_R }))); navMap = currentMap; }
+  return navToward(nav, e.pos.x, e.pos.z, wp.x, wp.z) || wp;
+}
 // nothing solid between e and (x, z) at knee height
 function clearTo(e, x, z) {
   _o.set(e.pos.x, e.pos.y + 0.6, e.pos.z); _h.set(x - e.pos.x, 0, z - e.pos.z);
@@ -672,6 +748,13 @@ function clearTo(e, x, z) {
   _h.divideScalar(d); return rayWorld(_o, _h, d) >= d;
 }
 function randomGoal() {
+  if (oneLife() && storm.on) { // somewhere inside the next circle
+    for (let i = 0; i < 20; i++) {
+      const a = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * storm.tr * 0.8, x = storm.tx + Math.cos(a) * d, z = storm.tz + Math.sin(a) * d;
+      if (Math.abs(x) < HALF && Math.abs(z) < HALF && !boxes.some(b => x + 1 > b.min.x && x - 1 < b.max.x && z + 1 > b.min.z && z - 1 < b.max.z)) return new V3(x, 0, z);
+    }
+    return new V3(storm.tx, 0, storm.tz);
+  }
   if (STAIRS.length && Math.random() < 0.25) { const st = pick(STAIRS); return new V3(st.top[0], st.y1, st.top[1]); } // roam upstairs too
   for (let i = 0; i < 20; i++) {
     const x = rand(-HALF, HALF), z = rand(-HALF, HALF);
@@ -688,7 +771,7 @@ function updateBot(b, dt) {
     ai.nextScan = now + 0.22;
     let best = null, bd = Infinity;
     for (const t of ents) {
-      if (t === b || !t.alive) continue;
+      if (t === b || !t.alive || sameTeam(t, b)) continue;
       let d = t.pos.distanceTo(b.pos) * (t.isPlayer ? 0.85 : 1);
       if (d < 55 && d < bd && canSee(b, t)) { bd = d; best = t; }
     }
@@ -716,12 +799,13 @@ function updateBot(b, dt) {
     if (b.ammo[b.weapon] < w.mag * 0.25 && !b.reloading && dist > 20) startReload(b);
   } else {
     const chasing = now - ai.lastSeenAt < 6;
+    if (oneLife() && storm.on && Math.hypot(b.pos.x - storm.x, b.pos.z - storm.z) > storm.r - 3 && (!ai.goal || Math.hypot(ai.goal.x - storm.tx, ai.goal.z - storm.tz) > storm.tr)) ai.goal = null; // run from the storm
     if (!ai.goal || now > ai.goalExpire || (Math.hypot(ai.goal.x - b.pos.x, ai.goal.z - b.pos.z) < 1.5 && Math.abs(ai.goal.y - b.pos.y) < 1.5)) {
       if (chasing) { ai.goal = ai.lastSeen.clone(); ai.lastSeenAt = -99; } // chase the last sighting once, then wander
       else ai.goal = randomGoal();
       ai.goalExpire = now + rand(6, 10);
     }
-    const wp = stairWaypoint(b, ai.goal) || ai.goal;
+    const wp = navPoint(b, stairWaypoint(b, ai.goal) || ai.goal);
     wish.set(wp.x - b.pos.x, 0, wp.z - b.pos.z);
     if (!b.reloading && b.ammo[b.weapon] < w.mag) startReload(b);
   }
@@ -737,7 +821,7 @@ function updateBot(b, dt) {
     ai.lastPos.copy(b.pos); ai.stuckAt = now + 0.7;
   }
 
-  const speed = 6.4 * (stunned ? 0.45 : 1), k = (b.onGround ? 10 : 2.5) * dt;
+  const speed = 6.4 * (stunned ? 0.45 : 1), k = b.launched ? 0 : (b.onGround ? 10 * grip(b) : 2.5) * dt;
   b.vel.x += (wish.x * speed - b.vel.x) * Math.min(1, k);
   b.vel.z += (wish.z * speed - b.vel.z) * Math.min(1, k);
   moveEntity(b, dt);
@@ -1019,7 +1103,7 @@ function updatePlayer(dt) {
   const p = player;
   if (!p.alive) {
     const left = Math.ceil(p.respawnAt - now);
-    $('deathCount').textContent = game === 'zombies' ? 'Back next wave' : 'Back in ' + Math.max(1, left);
+    $('deathCount').textContent = game === 'zombies' ? 'Back next wave' : oneLife() ? `Out \u00b7 ${brAlive().length} left` : 'Back in ' + Math.max(1, left);
     camera.position.lerp(_o.copy(deathPos).add(new V3(0, 3, 0)), 1 - Math.pow(0.1, dt));
     if (killer && killer.alive) camera.lookAt(killer.pos.x, killer.pos.y + 1, killer.pos.z);
     if (now >= p.respawnAt) { respawn(p); $('death').hidden = true; refreshVM(); }
@@ -1068,12 +1152,14 @@ function updatePlayer(dt) {
     // ride the slide's momentum, fading to crouch speed, with a little steering
     const v = MOVE.crouch + (MOVE.slide - MOVE.crouch) * (p.slide / MOVE.slideTime);
     if (wish.lengthSq() > 0) p.slideDir.lerp(wish, Math.min(1, dt * 1.5)).normalize();
-    const k = Math.min(1, (p.onGround ? 6 : 1) * dt);
+    const k = Math.min(1, (p.onGround ? 6 * grip(p) : 1) * dt);
     p.vel.x += (p.slideDir.x * v - p.vel.x) * k; p.vel.z += (p.slideDir.z * v - p.vel.z) * k;
+  } else if (p.launched) {
+    p.vel.x += wish.x * 3 * dt; p.vel.z += wish.z * 3 * dt; // flying off a jump pad: nudge, don't brake
   } else {
     let speed = (zoomed ? MOVE.ads : p.sprint ? MOVE.sprint : MOVE.walk) * (w.speed || 1) * (now < p.stunUntil ? 0.5 : 1);
     if (target) speed = Math.min(speed, MOVE.crouch); // by intent, so standing back up isn't slowed
-    const k = Math.min(1, (p.onGround ? 12 : 3) * dt);
+    const k = Math.min(1, (p.onGround ? 12 * grip(p) : 3) * dt);
     p.vel.x += (wish.x * speed - p.vel.x) * k; p.vel.z += (wish.z * speed - p.vel.z) * k;
   }
   if (bound('jump') && p.onGround) { if (p.crouchOn && canStand(p)) p.crouchOn = false; p.vel.y = JUMP; p.onGround = false; }
@@ -1095,7 +1181,9 @@ function endSlide(p, natural) {
   p.slide = 0; p.slideReady = now + MOVE.slideCooldown;
   p.crouchOn = natural || !canStand(p);
 }
+let camHold = false; // the localhost test hook can park the menu camera
 function menuCamera(dt) {
+  if (camHold) return;
   const a = now * 0.07;
   camera.position.set(Math.cos(a) * 40, 19, Math.sin(a) * 40);
   camera.lookAt(0, 1, 0);
@@ -1117,7 +1205,7 @@ function addFeed(src, t, wname, head) {
   const nm = e => { const b = document.createElement('b'); b.textContent = e.name; b.style.color = e.color; return b; };
   const self = !src || src === t;
   if (!self) li.appendChild(nm(src));
-  const w = document.createElement('span'); w.className = 'w'; w.textContent = self ? 'suicide' : wname; li.appendChild(w);
+  const w = document.createElement('span'); w.className = 'w'; w.textContent = wname === 'Storm' ? 'storm' : self ? 'suicide' : wname; li.appendChild(w);
   if (head) { const h = document.createElement('span'); h.className = 'hs'; h.textContent = 'HEAD'; li.appendChild(h); }
   li.appendChild(nm(t));
   if ((src && src.isPlayer) || t.isPlayer) li.className = 'me';
@@ -1125,7 +1213,7 @@ function addFeed(src, t, wname, head) {
   while (feed.children.length > 5) feed.lastChild.remove();
   setTimeout(() => li.classList.add('fade'), 5000); setTimeout(() => li.remove(), 5600);
 }
-function sorted() { return ents.filter(e => !e.zombie).sort((a, b) => b.kills - a.kills || a.deaths - b.deaths); }
+function sorted() { return ents.filter(e => !e.zombie).sort((a, b) => (teamsOn() ? (a.team | 0) - (b.team | 0) : 0) || b.kills - a.kills || a.deaths - b.deaths); }
 // the three chips at the top: label and value for each, by game type
 function chips(a, av, b, bv, c, cv) { setText('sYouL', a); setText('sYou', String(av)); setText('sLeadL', b); setText('sLead', String(bv)); setText('sGoalL', c); setText('sGoal', String(cv)); }
 function updateScoreTop() {
@@ -1133,11 +1221,13 @@ function updateScoreTop() {
   if (game === 'aim') {
     return chips('Hits', AIM.hits, 'Accuracy', AIM.shots ? Math.round(100 * AIM.hits / AIM.shots) + '%' : '-', 'Time', Math.max(0, Math.ceil(AIM.end - now)));
   }
+  if (oneLife()) return chips('Alive', brAlive().length, 'Storm', stormText(), 'Kills', player.kills);
+  if (teamsOn()) { const s = teamScore(), me = player.team | 0; return chips(`${TEAM_NAMES[me]} (you)`, s[me], TEAM_NAMES[1 - me], s[1 - me], 'To win', scoreLimit()); }
   if (!leaderCache) leaderCache = sorted();
   const lead = leaderCache.find(e => !e.isPlayer) || leaderCache[0];
   chips('You', player.kills, 'Top rival', lead && !lead.isPlayer ? `${lead.name} ${lead.kills}` : '-', 'To win', scoreLimit());
 }
-const levelOf = e => e.isPlayer ? P.level(prog) : e.remote ? e.lv : '\u2013';
+const levelOf = e => e.isPlayer ? P.level(prog) : e.remote && !e.netbot ? e.lv : '\u2013';
 function buildTable(tbl) {
   tbl.innerHTML = '<tr><th>#</th><th>Player</th><th>Lv</th><th>Kills</th><th>Deaths</th></tr>';
   sorted().forEach((e, i) => {
@@ -1165,7 +1255,7 @@ function updateHUD(dt) {
   setText('nade', `${keyName(binds.nade)} \u00b7 ` + (nd > 0 ? `${nn} in ${nd}s` : `${nn} ready`)); $('nade').classList.toggle('ready', nd <= 0);
   flashT = Math.max(0, flashT - dt); $('flashFx').style.opacity = clamp(flashT, 0, 1);
   $('stunFx').style.opacity = now < p.stunUntil ? clamp((p.stunUntil - now) / 1.5, 0, 0.8) : 0;
-  if (game === 'zombies' || game === 'aim') updateScoreTop();
+  if (game === 'zombies' || game === 'aim' || oneLife()) updateScoreTop();
   $('reloadTxt').hidden = !p.reloading;
   $('scope').hidden = !(zoomed && w.scope && p.alive && camera.fov < 40);
   // crosshair gap matches the real spread cone
@@ -1256,7 +1346,11 @@ function loadoutChanged() {
 // Every player streams a presence (position, aim, score, a ring of recent events) through the relay.
 // Shooters report hits; the player who was hit applies the damage and reports their own death,
 // so nobody edits anyone else's health.
-const net = { room: null, status: '', myPeer: Math.random().toString(36).slice(2, 12), seq: 0, ev: [], lastSeq: new Map(), remotes: new Map(), m: 1, sendAt: 0 };
+// cfg: the room's settings; host: who runs the bots (the server says: whoever has been in the room longest);
+// bots: the host's bots as I see them (others' screens); tscore: the host's team scores
+const net = { room: null, status: '', myPeer: Math.random().toString(36).slice(2, 12), seq: 0, ev: [], lastSeq: new Map(), remotes: new Map(), m: 1, sendAt: 0,
+  cfg: null, host: null, bots: new Map(), tscore: null, rosterAt: 0 };
+const botHost = () => mode === 'online' && net.host === net.myPeer;
 const myHat = HATS[(Math.random() * HATS.length) | 0];
 const r2 = v => Math.round(v * 100) / 100;
 const num = v => (Number.isFinite(+v) ? +v : 0);
@@ -1269,7 +1363,7 @@ const cleanRoom = v => String(v || '').toLowerCase().replace(/[^a-z0-9_-]/g, '')
 
 function netEvent(...e) {
   if (mode !== 'online') return;
-  net.ev.push([++net.seq, ...e]); if (net.ev.length > 16) net.ev.shift();
+  net.ev.push([++net.seq, ...e]); if (net.ev.length > 24) net.ev.shift();
   netSend(true);
 }
 function netSend(force) {
@@ -1279,17 +1373,24 @@ function netSend(force) {
   net.room.presence({ v: 1, n: p.name, c: p.color, m: net.m,
     p: [r2(p.pos.x), r2(p.pos.y), r2(p.pos.z)], yw: r2(p.yaw), pt: r2(p.pitch), w: p.guns[p.weapon].id,
     a: state === 'playing' && p.alive ? 1 : 0, dd: p.alive ? 0 : 1, hp: Math.ceil(p.hp), k: p.kills, d: p.deaths, ev: net.ev,
-    cr: r2(p.crouch), sl: r2(p.slideK),
+    cr: r2(p.crouch), sl: r2(p.slideK), tm: p.team,
+    bt: botHost() ? botState() : undefined, sto: botHost() && oneLife() ? stormState() : undefined, tsc: botHost() && teamsOn() ? teamScore() : undefined,
     sk: prog.uniform, cm: prog.camo[p.guns[p.weapon].id], lv: P.level(prog), su: p.guns[p.weapon].sup ? 1 : 0,
     z: game === 'zombies' && zHost() ? zombieState() : undefined });
 }
 function startOnline(code) {
-  net.room = joinRoom(code, net.myPeer, settings.map, game, {
+  const opts = { map: settings.map, game, bots: settings.bots, diff: settings.diff, ts: settings.ts, lim: settings.lim, side: settings.side, pub: settings.pub ? 1 : 0 };
+  net.room = joinRoom(code, net.myPeer, opts, {
     onPeer: applyRemote,
-    onRoom: (map, g) => {
+    onHost: setHost,
+    onRoom: ({ map, game: g, cfg: c, team, host }) => {
       net.map = map;
       const changed = GAMES[g] && g !== 'aim' && g !== game;
       if (changed) { game = g; resetZombies(); player.kills = player.deaths = 0; toast('This room plays <em></em>', GAMES[g], false); }
+      if (c && typeof c === 'object') net.cfg = { bots: clamp(c.bots | 0, 0, 11), diff: DIFF[c.diff] ? c.diff : 'normal', ts: clamp(c.ts | 0, 1, 6), lim: clamp(c.lim | 0, 5, 100), side: c.side };
+      player.team = teamsOn() ? (team === 1 ? 1 : 0) : undefined;
+      player.color = teamsOn() ? TEAM_COLORS[player.team] : myHat;
+      setHost(host);
       if (map !== currentMap) setMap(map);
       if (changed || map !== currentMap || net.map !== settings.map) { respawn(player); refreshVM(); }
       leaderCache = null; updateScoreTop(); netSend(true);
@@ -1304,7 +1405,8 @@ function leaveRoom() {
   if (net.room) net.room.leave();
   net.room = null; net.status = ''; net.map = null;
   for (const r of [...net.remotes.values()]) removeRemote(r);
-  net.lastSeq.clear(); net.ev = [];
+  for (const b of [...net.bots.values()]) removeNetBot(b);
+  net.lastSeq.clear(); net.ev = []; net.cfg = null; net.host = null; net.tscore = null;
   resetZombies();
 }
 function removeRemote(r) {
@@ -1338,7 +1440,12 @@ function applyRemote(id, s) {
   if (sk !== r.sk) { r.sk = sk; applyLook(r.mesh.userData.uniM, sk); }
   if (cm !== r.cm) { r.cm = cm; applyLook(r.mesh.userData.gunM, cm); }
   if (lv !== r.lv) { r.lv = lv; setTag(r.mesh, r.name, r.color, lv); }
+  r.team = teamsOn() && (s.tm === 0 || s.tm === 1) ? s.tm : undefined;
   if (game === 'zombies' && s.z && r.m === net.m && hostPeer() === id) syncZombies(s.z);
+  if (id === net.host && !botHost() && r.m === net.m) {
+    syncBots(s.bt); if (oneLife()) syncStorm(s.sto);
+    net.tscore = Array.isArray(s.tsc) ? [Math.max(0, s.tsc[0] | 0), Math.max(0, s.tsc[1] | 0)] : null;
+  }
   const alive = s.a === 1;
   if (alive && !r.alive) { r.alive = true; r.pos.copy(r.target); r.yaw = r.tyaw; r.mesh.visible = true; poseSoldier(r, 0); }
   else if (!alive && r.alive) { r.alive = false; r.mesh.visible = false; }
@@ -1360,13 +1467,21 @@ function handleNetEvent(r, e) {
   } else if (type === 'h') {
     // a hit on me, or (if I run the zombies) on one of my zombies
     const wn = wname(e[5]), amt = clamp(num(e[3]), 0, 250);
-    if (e[2] === net.myPeer && state === 'playing') damage(player, amt, wn === 'Zombie' ? nearestZombie(player.pos) || r : r, wn, e[4] === 1, null);
-    else if (typeof e[2] === 'string' && e[2][0] === 'z' && game === 'zombies' && zHost()) {
+    if (e[2] === net.myPeer && state === 'playing') {
+      const src = wn === 'Zombie' ? nearestZombie(player.pos) || r : (typeof e[6] === 'string' && net.bots.get(e[6])) || r; // a bot's shot, or theirs
+      damage(player, amt, src, wn, e[4] === 1, null);
+    } else if (typeof e[2] === 'string' && e[2][0] === 'z' && game === 'zombies' && zHost()) {
       const z = Z.byId.get(+e[2].slice(1)); if (z && z.alive) damage(z, amt, r, wn, e[4] === 1, null);
+    } else if (typeof e[2] === 'string' && e[2][0] === 'b' && botHost()) {
+      const b = myBot(e[2]); if (b && b.alive) damage(b, amt, r, wn, e[4] === 1, null);
     }
   } else if (type === 'x') {
-    const k = e[2] === net.myPeer ? player : (e[2] && net.remotes.get(e[2])) || null;
+    const k = byId(e[2]);
     remoteDied(r, k === r ? null : k, wname(e[3]), e[4] === 1);
+  } else if (type === 'bx') {
+    // one of the host's bots went down
+    const b = r.peer === net.host && net.bots.get('b' + (e[2] | 0));
+    if (b) remoteDied(b, byId(e[3]), wname(e[4]), e[5] === 1);
   } else if (type === 'n') {
     const t = NADE_TYPES[clamp(e[8] | 0, 0, NADE_TYPES.length - 1)], v = c => clamp(num(c), -60, 60);
     const pos = new V3(clamp(num(e[2]), -40, 40), clamp(num(e[3]), -5, 40), clamp(num(e[4]), -40, 40));
@@ -1383,11 +1498,12 @@ function remoteDied(r, k, wname, head) {
   bodyC(r, _b); burst(_b, [...BLOOD, new THREE.Color(r.color).getHex()], 14, 5, 0.1, 0.9);
   corpse(r);
   addFeed(k, r, wname, head);
-  if (k === player && state === 'playing') { player.kills++; gunGameStep(player); sfx.kill(); toast(`Eliminated <em></em>`, r.name, head); awardKill(wname, head); netSend(true); }
+  if (k === player && state === 'playing') { player.kills++; gunGameStep(player); killReward(player); sfx.kill(); toast(`Eliminated <em></em>`, r.name, head); awardKill(wname, head); netSend(true); }
+  else if (k && k.ai) { k.kills++; gunGameStep(k); } // a bot I run got them
   leaderCache = null; updateScoreTop(); checkWinOnline();
 }
 function updateRemotes(dt) {
-  for (const r of net.remotes.values()) {
+  for (const r of [...net.remotes.values(), ...net.bots.values()]) {
     if (!r.alive) continue;
     const px = r.pos.x, pz = r.pos.z;
     if (r.pos.distanceTo(r.target) > 6) r.pos.copy(r.target); else r.pos.lerp(r.target, 1 - Math.pow(0.0001, dt));
@@ -1397,9 +1513,87 @@ function updateRemotes(dt) {
   }
 }
 function checkWinOnline() {
-  if (mode !== 'online' || state !== 'playing' || !versus()) return;
-  const w = [player, ...[...net.remotes.values()].filter(r => r.m === net.m)].find(e => e.kills >= scoreLimit());
-  if (w) endGame(w);
+  if (mode !== 'online' || state !== 'playing') return;
+  const w = winnerNow(); if (w) endGame(w);
+}
+// ---------- bots online ----------
+// The host (whoever has been in the room longest) runs the bots like offline and puts their state in its presence;
+// everyone else draws them from that and sends their hits on them to the host, like hits on players.
+const myBot = id => (typeof id === 'string' ? ents.find(e => e.ai && 'b' + e.bid === id) : null);
+const byId = id => (!id ? null : id === net.myPeer ? player : net.remotes.get(id) || net.bots.get(id) || myBot(id) || null);
+const humansInMatch = () => [player, ...[...net.remotes.values()].filter(r => r.m === net.m)];
+// [id, name, team (-1 none), x, y, z, yaw, pitch, weapon, alive, kills, deaths, fired since last time, crouch, hp]
+function botState() {
+  return ents.filter(e => e.ai).map(b => {
+    const f = b.fired ? 1 : 0; b.fired = false;
+    return [b.bid, b.name, b.team === undefined ? -1 : b.team, r2(b.pos.x), r2(b.pos.y), r2(b.pos.z), r2(b.yaw), r2(b.pitch), b.guns[b.weapon].id,
+      b.alive ? 1 : 0, b.kills, b.deaths, f, r2(b.crouch), Math.ceil(b.hp)];
+  });
+}
+function syncBots(list) {
+  if (!Array.isArray(list)) return;
+  const seen = new Set();
+  for (const a of list.slice(0, 12)) {
+    if (!Array.isArray(a)) continue;
+    const id = 'b' + (a[0] | 0), team = teamsOn() && (a[2] === 0 || a[2] === 1) ? a[2] : undefined; seen.add(id);
+    let b = net.bots.get(id);
+    if (!b) {
+      const name = cleanName(a[1]) || 'Bot';
+      b = newEntity(name, team === undefined ? HATS[(a[0] | 0) % HATS.length] : TEAM_COLORS[team], false);
+      Object.assign(b, { remote: true, netbot: true, peer: id, bid: a[0] | 0, team, target: new V3(), tyaw: 0 });
+      b.mesh = soldierMesh(name, b.color, true, randomLook()); b.mesh.visible = false;
+      net.bots.set(id, b); ents.push(b); leaderCache = null;
+    }
+    b.target.set(clamp(num(a[3]), -32, 32), clamp(num(a[4]), 0, 20), clamp(num(a[5]), -32, 32));
+    b.tyaw = num(a[6]); b.pitch = clamp(num(a[7]), -1.5, 1.5); b.weapon = clamp(a[8] | 0, 0, WEAPONS.length - 1);
+    b.kills = Math.max(0, a[10] | 0); b.deaths = Math.max(0, a[11] | 0); b.crouch = clamp(num(a[13]), 0, 1); b.hp = clamp(num(a[14]), 0, 100);
+    if (a[9] === 1 && !b.alive) { b.alive = true; b.pos.copy(b.target); b.yaw = b.tyaw; b.mesh.visible = true; poseSoldier(b, 0); }
+    else if (a[9] !== 1 && b.alive) { b.alive = false; b.mesh.visible = false; }
+    if (a[12] === 1 && b.alive) botShotFx(b);
+  }
+  for (const [id, b] of net.bots) if (!seen.has(id)) removeNetBot(b);
+}
+// a host bot fired: a tracer along its aim and the sound
+function botShotFx(b) {
+  const w = WEAPONS[b.weapon]; if (w.kind === 'melee') return;
+  eyePos(b, _o); fwdVec(b.yaw, b.pitch, _f);
+  tracer(muzzleOf(b), _o.clone().addScaledVector(_f, rayWorld(_o, _f, w.range)), false);
+  sfxShot(w.id, distVol(b.pos));
+}
+function removeNetBot(b) {
+  scene.remove(b.mesh); net.bots.delete(b.peer);
+  const i = ents.indexOf(b); if (i >= 0) ents.splice(i, 1);
+  leaderCache = null;
+}
+// the server says who runs the bots; if that's now me, I take over the ones I was drawing, as they were
+function setHost(id) {
+  net.host = typeof id === 'string' ? id : null;
+  if (!botHost() || !net.bots.size) return;
+  const sum = [0, 0];
+  for (const nb of [...net.bots.values()]) {
+    removeNetBot(nb);
+    const b = makeBot(nb.team, cfg().diff, nb.name, nb.bid);
+    b.kills = nb.kills; b.deaths = nb.deaths;
+    if (nb.alive) { b.pos.copy(nb.target); b.yaw = nb.tyaw; b.mesh.position.copy(b.pos); } else { b.alive = false; b.mesh.visible = false; b.respawnAt = now + 2; }
+    if (b.team !== undefined) sum[b.team] += b.kills;
+  }
+  if (net.tscore && teamsOn()) for (const e of humansInMatch()) if (e.team !== undefined) sum[e.team] += e.kills;
+  if (net.tscore && teamsOn()) teams.bank = [0, 1].map(t => Math.max(0, net.tscore[t] - sum[t])); // keep kills of soldiers who left
+}
+// the host keeps the bot count right: the room's number of bots, or in team deathmatch enough to fill both sides
+function updateRoster() {
+  if (!botHost() || !versus() || state === 'menu' || now < net.rosterAt) return;
+  net.rosterAt = now + 1;
+  const c = cfg(), hum = humansInMatch(), want = new Map();
+  if (teamsOn()) { for (const t of [0, 1]) want.set(t, Math.max(0, c.ts - hum.filter(h => (h.team | 0) === t).length)); }
+  else want.set(undefined, Math.max(0, Math.min(c.bots, 12 - hum.length)));
+  const bots = ents.filter(e => e.ai);
+  for (const b of bots) if (!want.has(b.team)) removeBot(b); // left over from another game type
+  for (const [t, n] of want) {
+    const have = bots.filter(b => b.team === t && ents.includes(b));
+    have.sort((a, b) => a.alive - b.alive).slice(0, Math.max(0, have.length - n)).forEach(removeBot); // drop dead ones first
+    for (let i = have.length; i < n; i++) makeBot(t, c.diff);
+  }
 }
 function updateNetStatus() {
   const el = $('netStatus');
@@ -1411,16 +1605,59 @@ function updateNetStatus() {
     : n ? `${rm}${n + 1} players`
     : `${rm}waiting for friends (Esc → Copy invite link)`;
 }
+// The menu shows only what applies: offline it's the game setup; online it's either the server browser or
+// setting up a new room (the same game setup plus who can join and the code)
 function updateModeUI() {
-  const online = settings.mode === 'online';
-  if (online && settings.game === 'aim') { settings.game = 'ffa'; $('gameSeg').querySelector('[data-v=ffa]').click(); }
+  const online = settings.mode === 'online', browse = online && settings.otab !== 'create', g = settings.game;
+  if (online && g === 'aim') { $('gameSeg').querySelector('[data-v=ffa]').click(); return; }
+  $('onlineTabs').hidden = !online;
+  $('browsePane').hidden = !browse; $('setupPane').hidden = browse;
   $('gAim').hidden = online; // aim trainer is solo
-  $('botRows').hidden = online || settings.game === 'zombies' || settings.game === 'aim'; $('roomRows').hidden = !online;
-  $('playBtn').textContent = online ? 'Join room' : 'Play';
-  $('gameHelp').textContent = GAME_HELP[settings.game] || '';
+  const fighting = !['zombies', 'aim'].includes(g), tdm = g === 'tdm';
+  $('rowTs').hidden = !tdm; $('rowLim').hidden = !tdm; $('rowSide').hidden = !tdm || !online;
+  $('rowBots').hidden = !fighting || tdm; $('rowDiff').hidden = !fighting;
+  $('b0').hidden = !online; $('b11').hidden = g !== 'br'; // online a room can have no bots; battle royale takes a crowd
+  if (($('b0').hidden && settings.bots === 0) || ($('b11').hidden && settings.bots === 11)) $('botSeg').querySelector('[data-v="5"]').click();
+  $('tsHelp').textContent = online ? (settings.side === 'split' ? 'Players are split between the teams; bots fill the empty seats.' : 'Players join Blue together; bots fill the empty seats on both sides.')
+    : `You and ${settings.ts - 1 || 'no'} bot${settings.ts === 2 ? '' : 's'} against ${settings.ts} bot${settings.ts === 1 ? '' : 's'}.`;
+  $('roomRows').hidden = !online;
+  $('playBtn').hidden = browse;
+  $('playBtn').textContent = online ? 'Create room' : 'Play';
+  $('gameHelp').textContent = GAME_HELP[g] || '';
+  if (browse) refreshRooms();
+}
+// ---------- server browser ----------
+let roomsTimer = 0;
+async function refreshRooms() {
+  clearTimeout(roomsTimer);
+  if (state !== 'menu' || settings.mode !== 'online' || settings.otab === 'create') return;
+  let list = null;
+  try { const r = await fetch('/rooms', { cache: 'no-store' }); if (r.ok) list = await r.json(); } catch (e) {}
+  const box = $('roomList'); box.textContent = '';
+  if (!Array.isArray(list)) { box.innerHTML = '<p class="help">Couldn\'t reach the server. Trying again…</p>'; }
+  else if (!list.length) { box.innerHTML = '<p class="help">No public games right now. Create a room and your friends will find it here.</p>'; }
+  else for (const r of list.sort((a, b) => b.players - a.players)) {
+    const row = document.createElement('div'); row.className = 'room' + (r.players >= r.max ? ' full' : '');
+    const what = document.createElement('div'); what.className = 'what';
+    const name = document.createElement('b'); name.textContent = cleanRoom(r.code);
+    const info = document.createElement('small');
+    info.textContent = `${GAMES[r.game] || r.game}${r.game === 'tdm' ? ` ${r.ts}v${r.ts}` : ''} · ${MAPS[r.map] || r.map}${r.bots && r.game !== 'tdm' ? ` · ${r.bots} bots` : ''}`;
+    what.append(name, info);
+    const count = document.createElement('span'); count.className = 'count'; count.textContent = `${r.players}/${r.max}`;
+    const btn = document.createElement('button'); btn.className = 'btn ghost small'; btn.type = 'button'; btn.textContent = r.players >= r.max ? 'Full' : 'Join';
+    btn.disabled = r.players >= r.max; btn.addEventListener('click', () => joinCode(r.code));
+    row.append(what, count, btn); box.append(row);
+  }
+  roomsTimer = setTimeout(refreshRooms, 4000);
+}
+function joinCode(code) {
+  code = cleanRoom(code); if (!code) return;
+  settings.room = code; saveSettings(); startGame();
 }
 const GAME_HELP = {
   ffa: 'Everyone for themselves. First to 20 eliminations wins.',
+  tdm: 'Blue against Red. Every elimination scores for your team; first team to the target wins. No friendly fire.',
+  br: 'One life each. The storm closes in, so keep moving. Last soldier standing wins.',
   zombies: 'Team up against waves of zombies. Downed players come back each wave. Online, everyone in the room plays together.',
   gungame: 'Every two kills hands you the next weapon: AR, SMG, Shotgun, Sniper, RPG, then the knife. One knife kill wins.',
   moon: 'Knives only, in low gravity. Jump high, stab fast. First to 20.',
@@ -1428,6 +1665,77 @@ const GAME_HELP = {
   aim: 'Solo. 60 seconds, as many targets as you can hit.',
 };
 
+
+// ---------- battle royale: one life, a closing storm ----------
+// The storm is a circle (x, z, r) that waits, then shrinks to the next circle (tx, tz, tr) inside it, five times.
+// Outside it you lose health every second, more each phase. Offline or as the bot host this client runs it;
+// everyone else follows the host's.
+const PHASES = [[25, 20, 30, 3], [20, 18, 19, 5], [18, 16, 11, 8], [15, 14, 5, 12], [12, 12, 0, 18]]; // wait s, shrink s, next radius, damage/s
+const storm = { on: false, x: 0, z: 0, r: 48, fx: 0, fz: 0, fr: 48, tx: 0, tz: 0, tr: 30, phase: 0, waitEnd: 0, shrinkEnd: 0, dps: 2, tick: 0, mesh: null };
+function resetStorm() {
+  storm.on = oneLife(); storm.phase = -1; storm.x = storm.z = 0; storm.r = 48;
+  if (storm.on) nextPhase();
+  if (!storm.mesh) {
+    storm.mesh = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 60, 64, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0x9a3cdc, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false }));
+    storm.mesh.position.y = 20; scene.add(storm.mesh);
+  }
+  storm.mesh.visible = storm.on;
+}
+function nextPhase() {
+  const ph = PHASES[++storm.phase]; if (!ph) { storm.waitEnd = storm.shrinkEnd = Infinity; return; }
+  storm.fx = storm.x; storm.fz = storm.z; storm.fr = storm.r; storm.tr = ph[2]; storm.dps = PHASES[Math.max(0, storm.phase - 1)][3];
+  const a = Math.random() * Math.PI * 2, d = Math.random() * Math.max(0, storm.r - storm.tr) * 0.8, lim = Math.max(0, HALF - storm.tr * 0.5);
+  storm.tx = clamp(storm.x + Math.cos(a) * d, -lim, lim); storm.tz = clamp(storm.z + Math.sin(a) * d, -lim, lim);
+  storm.waitEnd = now + ph[0]; storm.shrinkEnd = storm.waitEnd + ph[1];
+}
+function updateStorm(dt) {
+  if (!storm.on || !storm.mesh) return;
+  const host = mode !== 'online' || botHost();
+  if (host && state !== 'menu') {
+    if (now >= storm.shrinkEnd) { storm.x = storm.tx; storm.z = storm.tz; storm.r = storm.tr; nextPhase(); }
+    else if (now >= storm.waitEnd) {
+      const k = (now - storm.waitEnd) / (storm.shrinkEnd - storm.waitEnd);
+      storm.x = storm.fx + (storm.tx - storm.fx) * k; storm.z = storm.fz + (storm.tz - storm.fz) * k; storm.r = storm.fr + (storm.tr - storm.fr) * k;
+      storm.dps = PHASES[storm.phase][3];
+    }
+  }
+  storm.mesh.position.x = storm.x; storm.mesh.position.z = storm.z; storm.mesh.scale.set(Math.max(0.1, storm.r), 1, Math.max(0.1, storm.r));
+  // the storm hurts me, and the bots I run
+  const out = e => e.alive && Math.hypot(e.pos.x - storm.x, e.pos.z - storm.z) > storm.r;
+  if (now >= storm.tick) { // in half-second bites, so it hurts (and sounds) like ticks
+    storm.tick = now + 0.5;
+    if (state === 'playing' && out(player)) damage(player, storm.dps * 0.5, null, 'Storm', false, null);
+    if (host) for (const e of ents) if (e.ai && out(e)) damage(e, storm.dps * 0.5, null, 'Storm', false, null);
+  }
+  $('stormFx').style.opacity = state === 'playing' && out(player) ? 0.85 : 0;
+}
+// [x, z, r, next x, next z, next r, seconds to shrink, seconds to done, dps]
+function stormState() {
+  return [r2(storm.x), r2(storm.z), r2(storm.r), r2(storm.tx), r2(storm.tz), r2(storm.tr), r2(Math.min(999, storm.waitEnd - now)), r2(Math.min(999, storm.shrinkEnd - now)), storm.dps];
+}
+function syncStorm(a) {
+  if (!Array.isArray(a) || a.length < 9) return;
+  const v = a.map(num);
+  storm.on = true; [storm.x, storm.z, storm.r, storm.tx, storm.tz, storm.tr] = v.slice(0, 6).map(n => clamp(n, -60, 60));
+  storm.r = Math.max(0, storm.r); storm.tr = Math.max(0, storm.tr);
+  storm.waitEnd = now + v[6]; storm.shrinkEnd = now + v[7]; storm.dps = clamp(v[8], 0, 50);
+  if (storm.mesh) storm.mesh.visible = true;
+}
+function stormText() {
+  if (!storm.on) return '-';
+  if (now < storm.waitEnd) return `closes in ${Math.ceil(storm.waitEnd - now)}s`;
+  return now < storm.shrinkEnd ? 'closing!' : storm.r < 1 ? 'everywhere' : 'holding';
+}
+// who is still in: me, players who haven't gone down, and living bots
+function brAlive() {
+  return ents.filter(e => !e.zombie && (!e.remote || e.netbot || e.m === net.m) && (e.remote && !e.netbot ? !e.dead : e.alive));
+}
+// battle royale: a kill patches you up and refills your guns
+function killReward(e) {
+  if (!oneLife() || !e || !e.alive || e.remote) return;
+  e.hp = Math.min(100, e.hp + 50); e.ammo = e.guns.map(w => w.mag); e.reloading = false;
+}
 
 // ---------- zombies: co-op waves ----------
 // Offline, or online as the host (the lowest player id still in this match), this client runs the zombies.
@@ -1517,7 +1825,7 @@ function updateZombie(z, dt, hs) {
   for (const h of hs) if (inPlay(h)) { const d = h.pos.distanceTo(z.pos); if (d < bd) { bd = d; tgt = h; } }
   const wish = new V3();
   if (tgt && now >= z.blindUntil) {
-    const wp = stairWaypoint(z, tgt.pos) || tgt.pos; // a target on another floor: head for the stairs
+    const wp = navPoint(z, stairWaypoint(z, tgt.pos) || tgt.pos); // a target on another floor: head for the stairs
     wish.set(wp.x - z.pos.x, 0, wp.z - z.pos.z).normalize();
     if (now < z.sideT) wish.set(-wish.z * z.side, 0, wish.x * z.side).addScaledVector(wish, 0.3).normalize(); // detour round a wall
     if (bd < 1.6 && now >= z.atkReady && Math.abs(tgt.pos.y - z.pos.y) < 1.5) {
@@ -1527,7 +1835,7 @@ function updateZombie(z, dt, hs) {
       else netEvent('h', tgt.peer, dmg, 0, ZOMBIE_W);
     }
   }
-  const sp = z.speed * (now < z.stunUntil ? 0.4 : 1), k = Math.min(1, (z.onGround ? 8 : 2) * dt);
+  const sp = z.speed * (now < z.stunUntil ? 0.4 : 1), k = z.launched ? 0 : Math.min(1, (z.onGround ? 8 * grip(z) : 2) * dt);
   z.vel.x += (wish.x * sp - z.vel.x) * k; z.vel.z += (wish.z * sp - z.vel.z) * k;
   moveEntity(z, dt);
   // blocked: climb the wall if the target is higher up (zombies scale buildings), otherwise go round
@@ -1637,7 +1945,7 @@ function setMap(name) {
 // so we join the room right away and wait on one "Play" click.
 function startGame(fromLink = false) {
   settings.name = cleanName($('nameIn').value) || 'Soldier';
-  settings.room = cleanRoom($('roomIn').value); $('roomIn').value = settings.room;
+  settings.room = cleanRoom(settings.room);
   saveSettings();
   leaveRoom();
   mode = settings.mode;
@@ -1652,7 +1960,11 @@ function startGame(fromLink = false) {
   for (const pl of piles) scene.remove(pl.g); piles.length = 0;
   $('feed').innerHTML = '';
   setMap(settings.map); // online, the room's map replaces this once connected
-  setupBots(mode === 'online' || !versus() ? 0 : settings.bots, settings.diff);
+  teams.bank = [0, 0]; net.tscore = null; resetStorm();
+  player.team = game === 'tdm' ? 0 : undefined; // online, the server seats you once connected
+  if (mode === 'online' || !versus()) setupBots(0, settings.diff);
+  else if (teamsOn()) { const ts = clamp(settings.ts | 0, 1, 6); setupBots(ts * 2 - 1, settings.diff, [...Array(ts - 1).fill(0), ...Array(ts).fill(1)]); } // you plus ts - 1 bots, against ts bots
+  else setupBots(settings.bots, settings.diff);
   player.kills = player.deaths = 0; player.nadeReady = 0;
   respawn(player); dressVM(); refreshVM();
   if (game === 'aim') startAim();
@@ -1680,6 +1992,8 @@ function playAgain() {
   const hi = Math.max(net.m, ...[...net.remotes.values()].map(r => r.m));
   net.m = hi > net.m ? hi : net.m + 1; // everyone who presses Play again lands on the same match number
   player.kills = player.deaths = 0; player.nadeReady = 0; resetRun(); resetZombies(); flashT = 0;
+  teams.bank = [0, 0]; net.tscore = null; resetStorm();
+  for (const e of ents) if (e.ai) { e.kills = e.deaths = 0; respawn(e); }
   respawn(player); refreshVM();
   leaderCache = null; updateScoreTop(); $('death').hidden = true;
   setState('playing'); netSend(true);
@@ -1687,10 +2001,11 @@ function playAgain() {
 }
 function endGame(winner) {
   setState('over');
-  $('overTitle').textContent = winner.isPlayer ? 'You win!' : `${winner.name} wins`;
+  const won = winner.isPlayer || (teamsOn() && winner.team === player.team);
+  $('overTitle').textContent = winner.isPlayer ? 'You win!' : won ? 'Your team wins!' : `${winner.name} wins`;
   buildTable($('overTbl'));
-  if (winner.isPlayer) sfx.kill();
-  gainXP(P.XP.match + (winner.isPlayer ? P.XP.win : 0), { match: true, win: winner.isPlayer });
+  if (won) sfx.kill();
+  gainXP(P.XP.match + (won ? P.XP.win : 0), { match: true, win: won });
   showOverXp();
 }
 function showOverXp() {
@@ -1706,7 +2021,8 @@ function toMenu() {
   leaveRoom(); mode = 'bots'; game = 'ffa'; stopAim(); flashT = 0; updateNetStatus();
   setState('menu');
   player.alive = false; player.respawnAt = Infinity;
-  setMap(settings.map); setupBots(5, 'normal');
+  setMap(settings.map); setupBots(5, 'normal'); resetStorm();
+  updateModeUI(); // back on the server browser, its list starts refreshing again
 }
 
 // menu wiring
@@ -1718,13 +2034,24 @@ function segment(id, key, parse, onChange) {
 }
 if (settings.mode !== 'online') settings.mode = 'bots';
 segment('modeSeg', 'mode', v => v, updateModeUI);
-$('roomIn').value = cleanRoom(settings.room);
-$('roomIn').addEventListener('keydown', e => { if (e.key === 'Enter') startGame(); });
+// a new room gets a fresh code, so two people creating rooms don't land in the same one by accident
+const freshCode = () => 'spud-' + Math.random().toString(36).slice(2, 6);
+$('roomIn').value = freshCode();
+function createRoom() { settings.room = cleanRoom($('roomIn').value); $('roomIn').value = settings.room; startGame(); }
+$('roomIn').addEventListener('keydown', e => { if (e.key === 'Enter') createRoom(); });
+$('joinIn').addEventListener('keydown', e => { if (e.key === 'Enter') joinCode($('joinIn').value); });
+$('joinBtn').addEventListener('click', () => joinCode($('joinIn').value));
+if (settings.otab !== 'create') settings.otab = 'browse';
+segment('otabSeg', 'otab', v => v, updateModeUI);
+segment('tsSeg', 'ts', v => +v, updateModeUI);
+segment('limSeg', 'lim', v => +v);
+segment('sideSeg', 'side', v => v, updateModeUI);
+segment('pubSeg', 'pub', v => v === 'true');
 segment('diffSeg', 'diff', v => v);
 if (!GAMES[settings.game]) settings.game = 'ffa';
 segment('gameSeg', 'game', v => v, updateModeUI);
-updateModeUI();
 segment('botSeg', 'bots', v => +v);
+updateModeUI();
 if (typeof settings.music !== 'boolean') settings.music = true;
 segment('musicSeg', 'music', v => v === 'true', () => setMusicOn(settings.music));
 setMusicOn(settings.music);
@@ -1757,8 +2084,8 @@ $('armBtn').addEventListener('click', () => openArmory(false));
 if (!MAPS[settings.map]) settings.map = 'depot';
 segment('mapSeg', 'map', v => v, () => { if (state === 'menu') { setMap(settings.map); setupBots(5, 'normal'); } });
 $('nameIn').value = settings.name;
-$('nameIn').addEventListener('keydown', e => { if (e.key === 'Enter') startGame(); });
-$('playBtn').addEventListener('click', () => startGame());
+$('nameIn').addEventListener('keydown', e => { if (e.key === 'Enter' && !$('playBtn').hidden) $('playBtn').click(); });
+$('playBtn').addEventListener('click', () => (settings.mode === 'online' ? createRoom() : startGame()));
 $('againBtn').addEventListener('click', playAgain);
 $('menuBtn').addEventListener('click', toMenu);
 $('quitBtn').addEventListener('click', toMenu);
@@ -1796,7 +2123,7 @@ async function copyInvite(code, btn, out) {
 function applyInvite() {
   const code = roomFromLink(); if (!code) return;
   if (settings.mode !== 'online') $('mOnline').click();
-  settings.room = code; $('roomIn').value = code; saveSettings();
+  settings.room = code; saveSettings();
   startGame(true);
 }
 $('inviteBtn').addEventListener('click', async () => {
@@ -1824,8 +2151,8 @@ function frame(t) {
       if (!e.isPlayer && !e.remote && !e.zombie) updateBot(e, dt);
       if (e.reloading && now >= e.reloadEnd) { e.ammo[e.reloadWeapon] = e.guns[e.reloadWeapon].mag; e.reloading = false; }
     }
-    if (mode === 'online') updateRemotes(dt);
-    updateZombies(dt); updateAim();
+    if (mode === 'online') { updateRemotes(dt); updateRoster(); }
+    updateZombies(dt); updateAim(); updateStorm(dt);
     updateNades(dt); updateParts(dt);
     for (const tr of tracers) if (tr.visible) { tr.userData.life -= dt; tr.material.opacity = tr.userData.life / 0.08; if (tr.userData.life <= 0) tr.visible = false; }
     for (const b of blasts) if (b.m.visible) { b.t += dt / 0.35; b.m.scale.setScalar(0.5 + b.t * 5.5); b.m.material.opacity = Math.max(0, 0.85 * (1 - b.t)); if (b.t >= 1) b.m.visible = false; }
@@ -1863,7 +2190,8 @@ function frame(t) {
   if (showVM) { renderer.clearDepth(); renderer.render(vmScene, vmCam); }
 }
 
-if (location.hostname === 'localhost') window.__spud = { player, net, ents, prog, Z, AIM, get game() { return game; }, get state() { return state; }, get now() { return now; } };
+if (location.hostname === 'localhost') window.__spud = { player, net, ents, prog, Z, AIM, settings, tryFire, teamScore, storm,
+  camAt: (x, y, z, tx, ty, tz) => { camHold = true; camera.position.set(x, y, z); camera.lookAt(tx, ty, tz); }, boxes, STAIRS, PADS, SPAWNS, startGame, toMenu: () => toMenu(), get game() { return game; }, get state() { return state; }, get now() { return now; } };
 resize();
 dressVM(); updateProfile();
 setMap(settings.map);

@@ -44,6 +44,7 @@ export const sfx = {
   hurt: () => tone(160, 0.12, 0.25, 'sawtooth', 80),
   boom: v => { noise(0.9, 380, 0.9 * v); tone(80, 0.6, 0.5 * v, 'sine', 30); },
   reload: () => { tone(500, 0.04, 0.08, 'square'); setTimeout(() => tone(700, 0.04, 0.08, 'square'), 120); },
+  pad: () => { tone(260, 0.3, 0.16, 'sine', 900); noise(0.25, 900, 0.1, 'bandpass', 1.5); },
   toss: () => noise(0.15, 600, 0.15, 'bandpass', 2),
   slide: () => noise(0.45, 700, 0.22, 'bandpass', 0.6),
   stun: v => { noise(0.5, 1200, 0.5 * v, 'bandpass', 3); tone(220, 0.5, 0.25 * v, 'sine', 110); },

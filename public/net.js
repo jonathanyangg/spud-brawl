@@ -1,9 +1,11 @@
 // Connection to the relay server (server.js). Each player sends one "presence" object
 // (position, aim, score, recent events); the server forwards it to everyone else in the room.
 // Reconnects on its own if the link drops.
-export function joinRoom(code, id, map, game, { onPeer, onLeave, onStatus, onRoom }) {
+// opts: what a new room is set up with ({ map, game, bots, diff, ts, lim, side, pub }); joining an existing room ignores them
+export function joinRoom(code, id, opts, { onPeer, onLeave, onStatus, onRoom, onHost }) {
   let ws = null, mine = null, dead = false, retryT = null, tries = 0;
-  const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?room=${encodeURIComponent(code)}&id=${id}&map=${map}&game=${game}`;
+  const q = new URLSearchParams({ room: code, id, ...opts });
+  const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?${q}`;
 
   function connect() {
     if (dead) return;
@@ -15,7 +17,8 @@ export function joinRoom(code, id, map, game, { onPeer, onLeave, onStatus, onRoo
       let m; try { m = JSON.parse(data); } catch (e) { return; }
       if (m.t === 'p' && m.pr && typeof m.pr === 'object') onPeer(m.k, m.pr);
       else if (m.t === 'bye') onLeave(m.k);
-      else if (m.t === 'room') onRoom(m.map, m.game); // what the room is playing
+      else if (m.t === 'room') onRoom(m); // what the room is playing: map, game, cfg, my team, and who the host is
+      else if (m.t === 'host') onHost(m.k);
       else if (m.t === 'full') { dead = true; onStatus('full'); }
     };
     ws.onclose = () => {

@@ -19,6 +19,7 @@
   <div class="hud" id="hud" hidden>
     <div id="hurt"></div>
     <div id="stunFx"></div>
+    <div id="stormFx"></div>
     <div id="scope" hidden></div>
     <div id="dmgdir"><span></span></div>
     <div id="scoretop">
@@ -52,7 +53,7 @@
   <div class="overlay" id="menu">
     <div class="menu-inner">
       <h1 class="title">Spud<br>Brawl</h1>
-      <p class="tag">Free-for-all firefights, zombie waves and minigames. Sprint, slide and aim down sights.</p>
+      <p class="tag">Team deathmatch, battle royale, zombie waves and more. Play bots offline, or find a game online.</p>
       <div class="profile">
         <div class="lvbadge" id="pLv" aria-label="Level 1">1</div>
         <div class="pxp">
@@ -89,64 +90,121 @@
           <input type="text" id="nameIn" maxlength="16" value="Soldier" autocomplete="off">
         </div>
         <div class="row">
-          <div class="lbl" id="modeLbl">Mode</div>
-          <div class="seg" id="modeSeg" role="group" aria-labelledby="modeLbl">
-            <button type="button" id="mBots" data-v="bots" aria-pressed="true">Vs bots</button>
-            <button type="button" id="mOnline" data-v="online" aria-pressed="false">Online with friends</button>
+          <div class="lbl" id="modeLbl">Play</div>
+          <div class="seg tabs" id="modeSeg" role="group" aria-labelledby="modeLbl">
+            <button type="button" id="mBots" data-v="bots" aria-pressed="true">Offline vs bots</button>
+            <button type="button" id="mOnline" data-v="online" aria-pressed="false">Online</button>
           </div>
         </div>
-        <div class="row">
-          <div class="lbl" id="gameLbl">Game</div>
-          <div class="seg" id="gameSeg" role="group" aria-labelledby="gameLbl" aria-describedby="gameHelp">
-            <button type="button" data-v="ffa" aria-pressed="true">Free-for-all</button>
-            <button type="button" data-v="zombies" aria-pressed="false">Zombies</button>
-            <button type="button" data-v="gungame" aria-pressed="false">Gun Game</button>
-            <button type="button" data-v="moon" aria-pressed="false">Moon Knives</button>
-            <button type="button" data-v="snipe" aria-pressed="false">Snipers Only</button>
-            <button type="button" id="gAim" data-v="aim" aria-pressed="false">Aim Trainer</button>
-          </div>
-          <p class="help" id="gameHelp"></p>
-        </div>
-        <div class="row">
-          <div class="lbl" id="mapLbl">Map</div>
-          <div class="seg" id="mapSeg" role="group" aria-labelledby="mapLbl">
-            <button type="button" data-v="depot" aria-pressed="true">Depot</button>
-            <button type="button" data-v="yard" aria-pressed="false">Market Yard</button>
-            <button type="button" data-v="dunes" aria-pressed="false">Dunes</button>
-            <button type="button" data-v="frost" aria-pressed="false">Frostbite</button>
-            <button type="button" data-v="stack" aria-pressed="false">Stackyard</button>
-            <button type="button" data-v="highrise" aria-pressed="false">Highrise</button>
+        <div class="row" id="onlineTabs" hidden>
+          <div class="seg" id="otabSeg" role="group" aria-label="Online">
+            <button type="button" data-v="browse" aria-pressed="true">Find a game</button>
+            <button type="button" data-v="create" aria-pressed="false">Create a room</button>
           </div>
         </div>
-        <div id="botRows" class="form">
-        <div class="row">
-          <div class="lbl" id="diffLbl">Bot skill</div>
-          <div class="seg" id="diffSeg" role="group" aria-labelledby="diffLbl">
-            <button type="button" id="dEasy" data-v="easy" aria-pressed="false">Easy</button>
-            <button type="button" id="dNormal" data-v="normal" aria-pressed="true">Normal</button>
-            <button type="button" id="dHard" data-v="hard" aria-pressed="false">Hard</button>
-          </div>
-        </div>
-        <div class="row">
-          <div class="lbl" id="botLbl">Bots</div>
-          <div class="seg" id="botSeg" role="group" aria-labelledby="botLbl">
-            <button type="button" id="b3" data-v="3" aria-pressed="false">3</button>
-            <button type="button" id="b5" data-v="5" aria-pressed="true">5</button>
-            <button type="button" id="b7" data-v="7" aria-pressed="false">7</button>
-          </div>
-        </div>
-        </div>
-        <div id="roomRows" class="form" hidden>
+
+        <!-- online: the server browser -->
+        <div id="browsePane" class="form" hidden>
+          <div class="rooms" id="roomList" aria-live="polite"><p class="help">Looking for games…</p></div>
           <div class="row">
-            <label for="roomIn">Room code</label>
-            <input type="text" id="roomIn" maxlength="20" value="brawl" autocomplete="off" spellcheck="false">
+            <label for="joinIn">Join with a code</label>
+            <div class="acctrow">
+              <input type="text" id="joinIn" maxlength="20" autocomplete="off" spellcheck="false" placeholder="room code">
+              <button class="btn ghost small" id="joinBtn" type="button">Join</button>
+            </div>
+            <p class="help">Private rooms aren't listed: join them with their code or an invite link.</p>
           </div>
-          <div class="invite" id="inviteRow">
-            <button class="btn ghost small" id="inviteBtn" type="button">Copy invite link</button>
-            <input type="text" id="inviteOut" readonly aria-label="Invite link" hidden>
+        </div>
+
+        <!-- offline game setup, and online: setting up a new room -->
+        <div id="setupPane" class="form">
+          <div class="row">
+            <div class="lbl" id="gameLbl">Game</div>
+            <div class="seg" id="gameSeg" role="group" aria-labelledby="gameLbl" aria-describedby="gameHelp">
+              <button type="button" data-v="ffa" aria-pressed="true">Free-for-all</button>
+              <button type="button" data-v="tdm" aria-pressed="false">Team Deathmatch</button>
+              <button type="button" data-v="br" aria-pressed="false">Battle Royale</button>
+              <button type="button" data-v="zombies" aria-pressed="false">Zombies</button>
+              <button type="button" data-v="gungame" aria-pressed="false">Gun Game</button>
+              <button type="button" data-v="moon" aria-pressed="false">Moon Knives</button>
+              <button type="button" data-v="snipe" aria-pressed="false">Snipers Only</button>
+              <button type="button" id="gAim" data-v="aim" aria-pressed="false">Aim Trainer</button>
+            </div>
+            <p class="help" id="gameHelp"></p>
           </div>
-          <p class="help" id="inviteMsg" aria-live="polite" hidden></p>
-          <p class="help" id="onlineHelp">Everyone types the same room code, or opens your invite link, and presses Join room. A new room plays the game and map you picked.</p>
+          <div class="row">
+            <div class="lbl" id="mapLbl">Map</div>
+            <div class="seg" id="mapSeg" role="group" aria-labelledby="mapLbl">
+              <button type="button" data-v="depot" aria-pressed="true">Depot</button>
+              <button type="button" data-v="yard" aria-pressed="false">Old Town</button>
+              <button type="button" data-v="dunes" aria-pressed="false">Dunes</button>
+              <button type="button" data-v="frost" aria-pressed="false">Frostbite</button>
+              <button type="button" data-v="stack" aria-pressed="false">Stackyard</button>
+              <button type="button" data-v="highrise" aria-pressed="false">Highrise</button>
+            </div>
+          </div>
+          <div class="row" id="rowTs">
+            <div class="lbl" id="tsLbl">Teams</div>
+            <div class="seg" id="tsSeg" role="group" aria-labelledby="tsLbl">
+              <button type="button" data-v="1" aria-pressed="false">1v1</button>
+              <button type="button" data-v="2" aria-pressed="false">2v2</button>
+              <button type="button" data-v="3" aria-pressed="false">3v3</button>
+              <button type="button" data-v="4" aria-pressed="true">4v4</button>
+              <button type="button" data-v="5" aria-pressed="false">5v5</button>
+            </div>
+            <p class="help" id="tsHelp"></p>
+          </div>
+          <div class="row" id="rowSide">
+            <div class="lbl" id="sideLbl">Players</div>
+            <div class="seg" id="sideSeg" role="group" aria-labelledby="sideLbl">
+              <button type="button" data-v="together" aria-pressed="true">Together vs bots</button>
+              <button type="button" data-v="split" aria-pressed="false">Split evenly</button>
+            </div>
+          </div>
+          <div class="row" id="rowLim">
+            <div class="lbl" id="limLbl">Score to win</div>
+            <div class="seg" id="limSeg" role="group" aria-labelledby="limLbl">
+              <button type="button" data-v="15" aria-pressed="false">15</button>
+              <button type="button" data-v="25" aria-pressed="true">25</button>
+              <button type="button" data-v="50" aria-pressed="false">50</button>
+            </div>
+          </div>
+          <div class="row" id="rowBots">
+            <div class="lbl" id="botLbl">Bots</div>
+            <div class="seg" id="botSeg" role="group" aria-labelledby="botLbl">
+              <button type="button" id="b0" data-v="0" aria-pressed="false">None</button>
+              <button type="button" data-v="3" aria-pressed="false">3</button>
+              <button type="button" data-v="5" aria-pressed="true">5</button>
+              <button type="button" data-v="7" aria-pressed="false">7</button>
+              <button type="button" id="b11" data-v="11" aria-pressed="false">11</button>
+            </div>
+          </div>
+          <div class="row" id="rowDiff">
+            <div class="lbl" id="diffLbl">Bot skill</div>
+            <div class="seg" id="diffSeg" role="group" aria-labelledby="diffLbl">
+              <button type="button" id="dEasy" data-v="easy" aria-pressed="false">Easy</button>
+              <button type="button" id="dNormal" data-v="normal" aria-pressed="true">Normal</button>
+              <button type="button" id="dHard" data-v="hard" aria-pressed="false">Hard</button>
+            </div>
+          </div>
+          <div id="roomRows" class="form" hidden>
+            <div class="row">
+              <div class="lbl" id="pubLbl">Who can join</div>
+              <div class="seg" id="pubSeg" role="group" aria-labelledby="pubLbl">
+                <button type="button" data-v="true" aria-pressed="true">Public: listed</button>
+                <button type="button" data-v="false" aria-pressed="false">Private: code only</button>
+              </div>
+            </div>
+            <div class="row">
+              <label for="roomIn">Room code</label>
+              <input type="text" id="roomIn" maxlength="20" value="brawl" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="invite" id="inviteRow">
+              <button class="btn ghost small" id="inviteBtn" type="button">Copy invite link</button>
+              <input type="text" id="inviteOut" readonly aria-label="Invite link" hidden>
+            </div>
+            <p class="help" id="inviteMsg" aria-live="polite" hidden></p>
+          </div>
         </div>
       </div>
       <div class="actions">

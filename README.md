@@ -1,23 +1,42 @@
 # Spud Brawl
 
-Arena shooter in the browser (three.js). Play vs bots, or online with friends in a shared room.
+Arena shooter in the browser (three.js). Play vs bots offline, or online: browse public games or create a room
+(public, or private and joined by code or invite link). Online rooms can have bots too.
 
-**Games:** Free-for-all, Zombies (co-op waves, solo or online), Gun Game, Moon Knives (knives only, low gravity), Snipers Only (one body shot kills), and a solo Aim Trainer.
+**Games:**
+- **Free-for-all:** first to 20.
+- **Team Deathmatch:** Blue against Red, 1v1 up to 5v5, first team to 15, 25 or 50. Bots fill the empty seats.
+  Online, the room's creator picks whether players go on one team against bots, or get split evenly.
+- **Battle Royale:** one life, a storm that closes in over five phases (more damage each phase), and a kill heals
+  you 50 and refills your guns. Last one standing wins.
+- **Zombies** (co-op waves), **Gun Game**, **Moon Knives** (knives only, low gravity), **Snipers Only** (one body shot
+  kills), and a solo **Aim Trainer**.
 
-**Maps:**
-- **Highrise:** a three-storey block (stairwells zigzag up to a roof, with a balcony on the 2nd floor) joined by a skybridge to an annex with a roof terrace.
-- **Depot:** containers, a gutted office, sniper decks.
-- **Market Yard:** the original.
-- **Dunes:** a desert outpost whose raised plaza has tunnels crossing underneath, plus a hut you can climb onto.
-- **Frostbite:** a snowed-in radio outpost with a two-storey lodge.
-- **Stackyard:** a tiny square of containers with catwalks across the tops, for fast fights on two levels.
+**Maps:** each one has its own file in `public/maps/`. All have several levels, tunnels or covered passages, and jump
+pads (step on the glowing pad and it throws you up onto a ledge or roof).
+- **Depot:** a rail yard with container stacks and catwalks, a station platform with a tunnel inside, a train you can
+  run through and across, a gantry crane, a signal box, a three-storey office and a warehouse.
+- **Old Town:** a fountain square between two tall houses, a bell tower, a town wall with gatehouses, a garden terrace
+  over a vaulted tunnel, row houses, an inn, and a covered market.
+- **Dunes:** desert canyons split by rock ridges, with ruins, tunnels through the ridges and a walkable ridge top.
+- **Frostbite:** a slippery frozen lake (you slide on ice), a snow hill with tunnels and an ice cave, a research station,
+  log cabins with lofts, a frozen waterfall and a ski lift.
+- **Stackyard:** a small container yard: stacks two and three high, containers you run through, catwalks, a crane.
+- **Highrise:** a city block: a parking garage, walk-ups with fire escapes, a plaza over an underpass, an elevated
+  train line and an office tower.
 
-Bots and zombies use the stairs (each map lists its flights, with doorway points for indoor ones), and zombies climb walls to reach anyone above them.
+Bots and zombies find their way round walls on a ground grid (`public/nav.js`), change floors by the stairs and
+jump pads, and zombies climb walls to reach anyone above them.
+
+**Online netcode:** the server only relays. Each player owns their own health. The room's host (whoever has been
+in it longest) runs the bots and the battle royale storm, and puts them in its updates; if the host leaves, the next
+player takes the bots over where they were.
 
 ```
 npm install
 npm start        # http://localhost:3000
-npm test         # progression + economy logic, relay, /api, headless browser
+npm test         # progression + economy logic, pathfinding, relay, /api, headless browser
+node tools/mapcheck.mjs   # every map: spawns, stairs, jump pads, connected ground
 ```
 
 `npm test` runs the game in headless Chromium if Playwright is installed (skipped otherwise). three.js comes from
@@ -30,7 +49,11 @@ cdnjs; where that host is blocked, point `THREE_JS` at a local r128 `three.min.j
 - `supabase/schema.sql`: the database (profiles, purchases, row level security, atomic spin/buy/credit functions)
 - `public/game.js`: the game (rendering, physics, bots, HUD, online sync)
 - `public/net.js`: WebSocket client, auto-reconnects
-- `public/world.js`: maps (every solid thing is a box), textures, spawn points
+- `public/world.js`: the list of maps and loading one
+- `public/kit.js`: the map-building kit: boxes, walls, floors, stairs, jump pads, textures
+- `public/maps/*.js`: one file per map
+- `public/nav.js`: the ground grid bots and zombies path on
+- `tools/mapcheck.mjs`: builds maps in Node and checks spawns, stairs, pads and that the ground is all connected (`node tools/mapcheck.mjs [map] --png` also draws a top-down picture)
 - `public/config.js`: weapons, movement speeds, bot skill, default key bindings
 - `public/audio.js`: generated sound effects
 - `public/music.js`: generated soundtrack (a menu theme and a match theme, Web Audio, no files)

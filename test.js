@@ -8,6 +8,7 @@ import WebSocket from 'ws';
 import Stripe from 'stripe';
 import * as P from './public/progress.js';
 import * as E from './public/economy.js';
+import { buildNav, navToward } from './public/nav.js';
 import { WEAPONS } from './public/config.js';
 
 // ---------- progression ----------
@@ -149,6 +150,23 @@ import { WEAPONS } from './public/config.js';
   assert.deepEqual(E.COIN_PACKS.map(p => [p.coins, p.cents]), [[500, 99], [1200, 199], [3000, 499]]);
   assert.equal(E.packById('medium').coins, 1200); assert.equal(E.packById('huge'), null);
   console.log('economy ok');
+}
+
+// ---------- ground pathfinding ----------
+{
+  // a wall across the middle of a 20 x 20 yard (x from -10 to 10, along z = 0) with a 2 m gap at x = 6..8
+  const box = (x0, x1, z0, z1, y0 = 0, y1 = 3) => ({ min: { x: x0, y: y0, z: z0 }, max: { x: x1, y: y1, z: z1 } });
+  const nav = buildNav([box(-10, 6, -0.2, 0.2), box(8, 10, -0.2, 0.2), box(-3, -2, 5, 6, 0, 0.4), box(-3, -2, -6, -5, 2.9, 3.2)], 10);
+  let x = -5, z = -5, steps = 0;
+  while (Math.hypot(x + 5, z - 5) > 0.5 && steps++ < 200) {
+    const p = navToward(nav, x, z, -5, 5); assert.ok(p, 'there is a way round');
+    const d = Math.hypot(p.x - x, p.z - z); x += (p.x - x) / d * Math.min(d, 0.5); z += (p.z - z) / d * Math.min(d, 0.5);
+    assert.ok(!(Math.abs(z) < 0.2 && (x < 6 || x > 8)), `walked through the wall at ${x.toFixed(2)}, ${z.toFixed(2)}`);
+  }
+  assert.ok(steps < 200, 'got there through the gap');
+  assert.equal(navToward(buildNav([box(-10, 10, -0.2, 0.2)], 10), -5, -5, -5, 5), null, 'sealed off: no path');
+  const open = buildNav([], 10); assert.deepEqual(navToward(open, 0, 0, 0.3, 0.2), { x: 0.3, z: 0.2 }, 'same cell: straight there');
+  console.log('nav ok');
 }
 
 // ---------- relay ----------
