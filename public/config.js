@@ -19,7 +19,7 @@ export const KNIFE = 5, SNIPER = 2;
 // the equipment slot: one throwable per loadout
 export const THROWABLES = { frag: { name: 'Frag', cd: 7, level: 1 }, stun: { name: 'Stun', cd: 9, level: 3 }, flash: { name: 'Flashbang', cd: 9, level: 5 } };
 // game types. Aim trainer is solo only.
-export const GAMES = { ffa: 'Free-for-all', zombies: 'Zombies', gungame: 'Gun Game', moon: 'Moon Knives', snipe: 'Snipers Only', aim: 'Aim Trainer' };
+export const GAMES = { ffa: 'Free-for-all', tdm: 'Team Deathmatch', br: 'Battle Royale', zombies: 'Zombies', gungame: 'Gun Game', moon: 'Moon Knives', snipe: 'Snipers Only', aim: 'Aim Trainer' };
 // gun game: two kills on each weapon, then one with the knife wins (AR, SMG, Shotgun, Sniper, RPG, Knife)
 export const GUNGAME = [3, 0, 1, 2, 4, 5];
 export const DIFF = {

@@ -1,9 +1,9 @@
 // Connection to the relay server (server.js). Each player sends one "presence" object
 // (position, aim, score, recent events); the server forwards it to everyone else in the room.
 // Reconnects on its own if the link drops.
-export function joinRoom(code, id, map, game, { onPeer, onLeave, onStatus, onRoom }) {
+export function joinRoom(code, id, map, game, { onPeer, onLeave, onStatus, onRoom }, { public: isPublic = true } = {}) {
   let ws = null, mine = null, dead = false, retryT = null, tries = 0;
-  const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?room=${encodeURIComponent(code)}&id=${id}&map=${map}&game=${game}`;
+  const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?room=${encodeURIComponent(code)}&id=${id}&map=${map}&game=${game}&public=${isPublic ? 1 : 0}`;
 
   function connect() {
     if (dead) return;

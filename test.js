@@ -169,8 +169,8 @@ process.on('exit', () => { for (const c of servers) c.kill(); });
 const PORT = 3999, base = `ws://localhost:${PORT}/ws`;
 await startServer(PORT);
 
-const open = (room, id, map = '', game = '') => new Promise((res, rej) => {
-  const ws = new WebSocket(`${base}?room=${room}&id=${id}&map=${map}&game=${game}`); ws.msgs = [];
+const open = (room, id, map = '', game = '', extra = '') => new Promise((res, rej) => {
+  const ws = new WebSocket(`${base}?room=${room}&id=${id}&map=${map}&game=${game}${extra}`); ws.msgs = [];
   ws.on('message', d => { const m = JSON.parse(d); if (m.t === 'room') { ws.map = m.map; ws.game = m.game; } else ws.msgs.push(m); });
   ws.on('open', () => res(ws)); ws.on('error', rej);
 });
@@ -201,6 +201,14 @@ const tick = () => new Promise(r => setTimeout(r, 100));
   assert.notEqual(res.status, 200, 'no files outside public');
   assert.equal((await fetch(`http://localhost:${PORT}/%E0`)).status, 404, 'bad encoding does not crash');
   assert.equal((await fetch(`http://localhost:${PORT}/`)).status, 200);
+  // public rooms show in the browser; private rooms join normally but stay out of the list
+  const listed = await open('listed', 'dddd4', 'dunes', 'tdm', '&public=1');
+  const hidden = await open('hidden', 'eeee5', 'highrise', 'br', '&public=0');
+  const browserRooms = await (await fetch(`http://localhost:${PORT}/api/rooms`)).json();
+  assert.ok(browserRooms.some(r => r.code === 'listed' && r.map === 'dunes' && r.game === 'tdm' && r.players === 1), 'public room is listed');
+  assert.ok(!browserRooms.some(r => r.code === 'hidden'), 'private room is not listed');
+  assert.equal(hidden.game, 'br', 'private rooms still play their selected mode');
+  for (const s of [listed, hidden]) s.close();
   for (const s of [a, b, b2, other]) s.close();
   console.log('relay ok');
 }

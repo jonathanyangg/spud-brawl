@@ -99,6 +99,8 @@
           <div class="lbl" id="gameLbl">Game</div>
           <div class="seg" id="gameSeg" role="group" aria-labelledby="gameLbl" aria-describedby="gameHelp">
             <button type="button" data-v="ffa" aria-pressed="true">Free-for-all</button>
+            <button type="button" data-v="tdm" aria-pressed="false">TDM</button>
+            <button type="button" data-v="br" aria-pressed="false">Battle Royale</button>
             <button type="button" data-v="zombies" aria-pressed="false">Zombies</button>
             <button type="button" data-v="gungame" aria-pressed="false">Gun Game</button>
             <button type="button" data-v="moon" aria-pressed="false">Moon Knives</button>
@@ -141,12 +143,25 @@
             <label for="roomIn">Room code</label>
             <input type="text" id="roomIn" maxlength="20" value="brawl" autocomplete="off" spellcheck="false">
           </div>
+          <div class="row">
+            <div class="lbl" id="roomVisLbl">Room visibility</div>
+            <div class="seg" id="roomVisSeg" role="group" aria-labelledby="roomVisLbl">
+              <button type="button" data-v="true" aria-pressed="true">Public</button>
+              <button type="button" data-v="false" aria-pressed="false">Private</button>
+            </div>
+          </div>
           <div class="invite" id="inviteRow">
             <button class="btn ghost small" id="inviteBtn" type="button">Copy invite link</button>
+            <button class="btn ghost small" id="newRoomBtn" type="button">New code</button>
+            <button class="btn ghost small" id="browseBtn" type="button" aria-expanded="false">Browse rooms</button>
             <input type="text" id="inviteOut" readonly aria-label="Invite link" hidden>
           </div>
+          <div class="browser" id="roomBrowser" hidden>
+            <div class="browser-head"><strong>Public rooms</strong><span id="roomsAt">–</span></div>
+            <div id="roomsList"><p class="help">Loading rooms…</p></div>
+          </div>
           <p class="help" id="inviteMsg" aria-live="polite" hidden></p>
-          <p class="help" id="onlineHelp">Everyone types the same room code, or opens your invite link, and presses Join room. A new room plays the game and map you picked.</p>
+          <p class="help" id="onlineHelp">Private rooms use invite links or codes. Public rooms also appear in the browser. A new room plays the game and map you picked.</p>
         </div>
       </div>
       <div class="actions">

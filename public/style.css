@@ -216,6 +216,11 @@ tr.me td{color:var(--butter)}
 .btn.pack span{font-family:var(--body);font-weight:700}
 .buybar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:8px 10px;border:1px solid var(--butter);border-radius:8px}
 .sw .price{font-size:11px;color:var(--butter);font-weight:700}
+.browser{margin:10px 0;border:1px solid var(--line);border-radius:12px;padding:10px;background:rgba(0,0,0,.18);max-height:180px;overflow:auto}
+.browser-head{display:flex;align-items:center;justify-content:space-between;font-size:13px;color:var(--muted);margin-bottom:8px}
+.room-item{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;padding:8px 10px;margin-bottom:6px;border-radius:9px;border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--cream);cursor:pointer;text-align:left;font:inherit}
+.room-item:hover{background:rgba(255,255,255,.08);border-color:var(--muted)}
+.room-item small{color:var(--muted)}
 @media (max-width:560px){
   #hpbox{width:150px}#wbox{min-width:150px}
   #hpnum,#ammo{font-size:28px}

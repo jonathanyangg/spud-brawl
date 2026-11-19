@@ -12,13 +12,18 @@ const PORT = process.env.PORT || 3000;
 const PUBLIC = fileURLToPath(new URL('./public/', import.meta.url));
 const MAX_PLAYERS = 12;
 const MAPS = ['depot', 'yard', 'dunes', 'frost', 'stack', 'highrise'];
-const GAMES = ['ffa', 'zombies', 'gungame', 'moon', 'snipe']; // aim trainer is solo, never a room
+const GAMES = ['ffa', 'tdm', 'br', 'zombies', 'gungame', 'moon', 'snipe']; // aim trainer is solo, never a room
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 
 const server = createServer(async (req, res) => {
+  const url = new URL(req.url, 'http://x');
+  if (url.pathname === '/api/rooms') {
+    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(roomsList()));
+    return;
+  }
   if (req.url.startsWith('/api/')) return handleApi(req, res);
   try {
-    const path = normalize(decodeURIComponent(new URL(req.url, 'http://x').pathname));
+    const path = normalize(decodeURIComponent(url.pathname));
     const file = join(PUBLIC, path.endsWith('/') ? path + 'index.html' : path);
     if (!file.startsWith(PUBLIC)) throw new Error('outside public');
     const body = await readFile(file);
@@ -28,7 +33,7 @@ const server = createServer(async (req, res) => {
   }
 });
 
-const rooms = new Map(); // room code -> { map, peers: Map(player id -> socket) }
+const rooms = new Map(); // room code -> { map, game, public, peers: Map(player id -> socket) }
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024 });
 
 wss.on('connection', (ws, req) => {
@@ -39,7 +44,12 @@ wss.on('connection', (ws, req) => {
 
   // whoever opens a room picks its map and game type; everyone who joins later plays those
   let room = rooms.get(code);
-  if (!room) rooms.set(code, room = { map: MAPS.includes(q.get('map')) ? q.get('map') : MAPS[0], game: GAMES.includes(q.get('game')) ? q.get('game') : GAMES[0], peers: new Map() });
+  if (!room) rooms.set(code, room = {
+    map: MAPS.includes(q.get('map')) ? q.get('map') : MAPS[0],
+    game: GAMES.includes(q.get('game')) ? q.get('game') : GAMES[0],
+    public: q.get('public') !== '0', // private rooms still work by code/invite; they're just never listed
+    peers: new Map(),
+  });
   const peers = room.peers, old = peers.get(id);
   if (old) old.terminate(); // same player reconnecting: drop the stale socket
   else if (peers.size >= MAX_PLAYERS) { ws.send('{"t":"full"}'); ws.close(); return; }
@@ -69,6 +79,13 @@ wss.on('connection', (ws, req) => {
 });
 
 const relay = (k, raw) => `{"t":"p","k":"${k}","pr":${raw}}`;
+
+// The server browser only needs public lobby metadata, never player identities.
+function roomsList() {
+  return [...rooms.entries()].filter(([, room]) => room.public).map(([code, room]) => ({
+    code, map: room.map, game: room.game, players: room.peers.size, max: MAX_PLAYERS,
+  }));
+}
 
 // drop sockets that stopped answering (closed laptop, lost wifi)
 setInterval(() => {
