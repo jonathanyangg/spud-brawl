@@ -1086,10 +1086,10 @@ function pressCode(code) {
   if (a === 'scores') { buildTable($('boardTbl')); $('board').hidden = false; }
   if (!player.alive || !a) return;
   if (player.drop) { if (a === 'jump') dropPress(player); return; }
-  if (a === 'w1') switchWeapon(player, 0);
-  else if (a === 'w2') switchWeapon(player, 1);
-  else if (a === 'w3') switchWeapon(player, 2);
-  else if (a === 'w4') switchWeapon(player, 3);
+  if (a === 'w1') switchWeapon(player, slotIdx(player, 0));
+  else if (a === 'w2') switchWeapon(player, slotIdx(player, 1));
+  else if (a === 'w3') switchWeapon(player, slotIdx(player, 2));
+  else if (a === 'w4') switchWeapon(player, slotIdx(player, 3));
   else if (a === 'use') useKey(player);
   else if (a === 'bandage' || a === 'medkit') startHeal(player, a);
   else if (a === 'inv') openInv();
@@ -1102,7 +1102,11 @@ function pressCode(code) {
   else if (a === 'crouch') crouchTap = true;
 }
 canvas.addEventListener('contextmenu', e => e.preventDefault());
-document.addEventListener('wheel', e => { const n = player.guns.length; if (state === 'playing' && player.alive && !player.drop) switchWeapon(player, (player.weapon + (e.deltaY > 0 ? 1 : n - 1)) % n); }, { passive: true });
+document.addEventListener('wheel', e => { // next or previous gun, in slot order
+  if (state !== 'playing' || !player.alive || player.drop || invOpen) return;
+  const order = slotOrder(player), n = order.length, k = order.indexOf(player.weapon);
+  switchWeapon(player, order[(k + (e.deltaY > 0 ? 1 : n - 1)) % n]);
+}, { passive: true });
 // Ctrl+W/T/N can't be blocked in a page, so a crouch bound to Ctrl could close the tab: ask first while in a match
 addEventListener('beforeunload', e => { if (state === 'playing') e.preventDefault(); });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; $('board').hidden = true; });
@@ -1291,8 +1295,30 @@ function dropCamera(p, dt = 0) {
   } else { hideSelf(); camera.position.set(p.pos.x, p.pos.y + EYE, p.pos.z); }
   camera.rotation.set(p.pitch, p.yaw, 0);
 }
-// battle royale: move the gun in your hands one slot left or right (the knife can move too)
-function moveSlot(e, dir) { if (oneLife()) swapSlots(e, e.weapon, e.weapon + dir); }
+// battle royale: every gun sits in a numbered slot (1-4) and slots can be empty, so you can put a gun on any key.
+// The guns list stays packed; g.slot says where each one shows. Elsewhere slot = list position.
+function fixSlots(e) {
+  const used = new Set();
+  e.guns.forEach((g, i) => {
+    if (!g.mine) e.guns[i] = g = { ...g, mine: true }; // our own copy, so the slot never lands on a shared weapon
+    if (!(g.slot >= 0 && g.slot < MAX_SLOTS) || used.has(g.slot)) g.slot = -1; else used.add(g.slot);
+  });
+  for (const g of e.guns) if (g.slot < 0) { let s = 0; while (used.has(s)) s++; g.slot = s; used.add(s); }
+}
+function slotIdx(e, s) { // the gun in slot s, or -1
+  if (!oneLife() || !e.isPlayer) return s < e.guns.length ? s : -1;
+  fixSlots(e); return e.guns.findIndex(g => g.slot === s);
+}
+const slotOrder = e => [...Array(MAX_SLOTS).keys()].map(s => slotIdx(e, s)).filter(i => i >= 0);
+// put gun i into slot s, trading places with whatever is there
+function moveToSlot(e, i, s) {
+  if (!oneLife() || !e.isPlayer) return swapSlots(e, i, s);
+  fixSlots(e); const g = e.guns[i]; if (!g || s < 0 || s >= MAX_SLOTS || g.slot === s) return;
+  const j = slotIdx(e, s); if (j >= 0) e.guns[j].slot = g.slot;
+  g.slot = s;
+}
+// move the gun in your hands one slot left or right (the knife can move too)
+function moveSlot(e, dir) { if (!oneLife()) return; fixSlots(e); moveToSlot(e, e.weapon, e.guns[e.weapon].slot + dir); }
 function swapSlots(e, i, j) {
   if (i === j || i < 0 || j < 0 || i >= e.guns.length || j >= e.guns.length) return;
   [e.guns[i], e.guns[j]] = [e.guns[j], e.guns[i]]; [e.ammo[i], e.ammo[j]] = [e.ammo[j], e.ammo[i]];
@@ -1325,17 +1351,24 @@ const gunStats = g => {
     ['Reload', g.kind === 'melee' ? '\u2013' : g.reload.toFixed(1) + 's'], ['Range', g.range + ' m'],
     ['Ammo', at ? AMMO[at].name : 'none'], ['Rarity', g.kind === 'melee' ? '\u2013' : R.name]];
 };
+const invSig = () => { const p = player; return [p.weapon, ...p.guns.map((g, i) => g.name + (g.rar | 0) + ':' + p.ammo[i] + '@' + g.slot), JSON.stringify(p.res), JSON.stringify(p.heals), binds.w1, binds.w2, binds.w3, binds.w4].join('|'); };
 function renderInv() {
+  fixSlots(player);
   const p = player, slots = $('invGuns');
-  invKey = [p.weapon, ...p.guns.map((g, i) => g.name + (g.rar | 0) + ':' + p.ammo[i]), JSON.stringify(p.res), JSON.stringify(p.heals)].join('|');
+  invKey = invSig();
   slots.textContent = '';
-  for (let i = 0; i < MAX_SLOTS; i++) {
-    const g = p.guns[i], el = document.createElement('div');
-    if (!g) { el.className = 'invGun empty'; el.textContent = 'Empty'; slots.append(el); continue; }
+  for (let s = 0; s < MAX_SLOTS; s++) {
+    const i = slotIdx(p, s), g = p.guns[i], el = document.createElement('div');
+    const line = (c, t) => { const d = document.createElement('div'); d.className = c; d.textContent = t; el.append(d); };
+    // every slot, full or not, takes a dropped gun
+    el.addEventListener('dragover', ev => { if (invDrag >= 0) { ev.preventDefault(); el.classList.add('over'); } });
+    el.addEventListener('dragleave', () => el.classList.remove('over'));
+    el.addEventListener('drop', ev => { ev.preventDefault(); if (invDrag >= 0) moveToSlot(p, invDrag, s); invDrag = -1; renderInv(); });
+    if (!g) { el.className = 'invGun empty'; line('k', keyName(binds['w' + (s + 1)] || '')); line('n', 'Empty'); slots.append(el); continue; }
     el.className = 'invGun' + (i === p.weapon ? ' on' : ''); el.draggable = true; el.dataset.i = i;
     if (g.kind !== 'melee') el.style.setProperty('--rar', rarCss(g.rar));
-    const at = AMMO_OF[g.id], line = (c, t) => { const s = document.createElement('div'); s.className = c; s.textContent = t; el.append(s); };
-    line('k', i < 4 ? keyName(binds['w' + (i + 1)] || '') : ''); line('n', g.name);
+    const at = AMMO_OF[g.id];
+    line('k', keyName(binds['w' + (s + 1)] || '')); line('n', g.name);
     line('r', g.kind === 'melee' ? 'Melee' : RARITY[g.rar | 0].name);
     if (at) line('a', `${p.ammo[i]} / ${g.mag} \u00b7 ${p.res[at] | 0} spare`);
     el.addEventListener('mouseenter', ev => showTip(g, ev)); el.addEventListener('mousemove', ev => moveTip(ev));
@@ -1343,9 +1376,6 @@ function renderInv() {
     el.addEventListener('click', () => { switchWeapon(p, i); renderInv(); });
     el.addEventListener('dragstart', ev => { invDrag = i; el.classList.add('drag'); $('invTip').hidden = true; ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', String(i)); });
     el.addEventListener('dragend', () => { invDrag = -1; renderInv(); });
-    el.addEventListener('dragover', ev => { if (invDrag >= 0) { ev.preventDefault(); el.classList.add('over'); } });
-    el.addEventListener('dragleave', () => el.classList.remove('over'));
-    el.addEventListener('drop', ev => { ev.preventDefault(); if (invDrag >= 0) swapSlots(p, invDrag, i); invDrag = -1; renderInv(); });
     slots.append(el);
   }
   const row = (box, color, name, have, max, use) => {
@@ -1373,7 +1403,7 @@ function moveTip(ev) { const t = $('invTip'); t.style.left = Math.min(innerWidth
 function updateInv() {
   if (!invOpen) return;
   if (state !== 'playing' || !player.alive || !oneLife()) { closeInv(false); return; }
-  if (invDrag < 0) { const p = player, k = [p.weapon, ...p.guns.map((g, i) => g.name + (g.rar | 0) + ':' + p.ammo[i]), JSON.stringify(p.res), JSON.stringify(p.heals)].join('|'); if (k !== invKey) renderInv(); }
+  if (invDrag < 0 && invSig() !== invKey) renderInv();
 }
 // natural end: you stay crouched; cancelled: you stand (if there's room)
 function endSlide(p, natural) {
@@ -1446,11 +1476,15 @@ function updateHUD(dt) {
   if (txtCache.get('ammo') !== s) { txtCache.set('ammo', s); ammo.innerHTML = w.kind === 'melee' ? '&ndash;' : `${p.ammo[p.weapon]} <small>/ ${spare}</small>`; }
   // each slot shows the key you bound to it
   const br = oneLife(), sk = i => keyName(binds['w' + (i + 1)] || '');
-  const slotKey = [br, ...p.guns.map(g => g.name + (g.rar | 0)), ...[1, 2, 3, 4].map(i => binds['w' + i])].join();
+  if (br) fixSlots(p);
+  const slotKey = [br, ...p.guns.map(g => g.name + (g.rar | 0) + '@' + g.slot), ...[1, 2, 3, 4].map(i => binds['w' + i])].join();
   if (txtCache.get('slots') !== slotKey) {
     txtCache.set('slots', slotKey); $('slots').textContent = '';
-    p.guns.forEach((g, i) => {
-      const sp = document.createElement('span'); sp.textContent = i < 4 ? `${sk(i)} ${g.name}` : g.name;
+    const list = br ? [...Array(MAX_SLOTS).keys()].map(s => slotIdx(p, s)) : p.guns.map((g, i) => i);
+    list.forEach((i, s) => {
+      const g = p.guns[i], sp = document.createElement('span'); sp.dataset.i = i;
+      if (!g) { sp.className = 'empty'; sp.textContent = `${sk(s)} –`; $('slots').append(sp); return; }
+      sp.textContent = s < 4 ? `${sk(s)} ${g.name}` : g.name;
       if (br && g.kind !== 'melee') { // battle royale: each slot wears its gun's rarity color
         const R = RARITY[g.rar | 0];
         sp.classList.add('rar'); sp.style.setProperty('--rar', rarCss(g.rar)); sp.title = R.name;
@@ -1459,7 +1493,7 @@ function updateHUD(dt) {
       $('slots').append(sp);
     });
   }
-  [...$('slots').children].forEach((el, i) => el.classList.toggle('on', i === p.weapon));
+  [...$('slots').children].forEach(el => el.classList.toggle('on', +el.dataset.i === p.weapon));
   $('nade').hidden = !nadesOn();
   const nd = Math.ceil(p.nadeReady - now), nn = (THROWABLES[p.nade] || THROWABLES.frag).name;
   setText('nade', `${keyName(binds.nade)} \u00b7 ` + (nd > 0 ? `${nn} in ${nd}s` : `${nn} ready`)); $('nade').classList.toggle('ready', nd <= 0);
@@ -2300,7 +2334,7 @@ function useKey(p) {
   if (p.guns.length < MAX_SLOTS) { giveGun(p, it.w, it.qty, undefined, it.r); takeItem(it); sfx.pick(); return; }
   const slot = p.weapon, old = p.guns[slot];
   dropItems(p, [{ kind: 'gun', w: old.id, qty: Math.max(1, p.ammo[slot]), r: old.rar | 0 }]);
-  takeItem(it); giveGun(p, it.w, it.qty, slot, it.r); switchWeapon(p, slot); sfx.pick();
+  takeItem(it); giveGun(p, it.w, it.qty, slot, it.r); p.guns[slot].slot = old.slot; switchWeapon(p, slot); sfx.pick();
   toast('Swapped for <em></em>', lootName(it), false);
 }
 // bots: open a chest when they reach it, and go for one (or a gun on the floor) while they're short of guns

@@ -288,3 +288,7 @@ tr.me td{color:var(--butter)}
 #reloadTxt span{display:block;height:5px;background:rgba(0,0,0,.45);border-radius:3px;overflow:hidden}
 #reloadFill{display:block;height:100%;width:0;background:var(--butter)}
 #deathKeys{color:var(--muted);font-size:12px}
+
+/* empty loadout slots still show their key */
+#slots span.empty{opacity:.5;border-style:dashed}
+.invGun.empty{flex-direction:column;gap:2px}
