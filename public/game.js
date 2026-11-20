@@ -2664,7 +2664,7 @@ function endAim() {
 // ---------- state ----------
 function setState(s) {
   state = s;
-  if (s === 'menu' || s === 'over') setMusic('menu'); else if (s === 'playing') setMusic('match');
+  setMusic(s === 'menu' ? 'menu' : null); // the soundtrack is for the menu only: matches are quiet
   if (s === 'menu') { $('armory').hidden = true; updateProfile(); }
   if (s !== 'playing') clearBanners();
   $('menu').hidden = s !== 'menu';

@@ -63,7 +63,7 @@ cdnjs; where that host is blocked, point `THREE_JS` at a local r128 `three.min.j
 - `tools/mapcheck.mjs`: builds maps in Node and checks spawns, stairs, pads and that the ground is all connected (`node tools/mapcheck.mjs [map] --png` also draws a top-down picture)
 - `public/config.js`: weapons, movement speeds, bot skill, default key bindings
 - `public/audio.js`: generated sound effects
-- `public/music.js`: generated soundtrack (a menu theme and a match theme, Web Audio, no files)
+- `public/music.js`: generated soundtrack (Web Audio, no files). Only the menu theme plays; matches have no music
 - `public/progress.js`: XP, levels, unlock rules and attachment stats (pure logic, tested by `npm test`)
 - `public/skins.js`: camo patterns drawn on a canvas, used on soldiers, guns and Armory swatches
 - `public/armory.js`: the Armory screen (and the coin shop's looks when signed in)
