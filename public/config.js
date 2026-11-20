@@ -18,6 +18,21 @@ export const WEAPONS = [
 export const KNIFE = 5, SNIPER = 2;
 // the equipment slot: one throwable per loadout
 export const THROWABLES = { frag: { name: 'Frag', cd: 7, level: 1 }, stun: { name: 'Stun', cd: 9, level: 3 }, flash: { name: 'Flashbang', cd: 9, level: 5 } };
+// battle royale loot: you land with a knife and find the rest in chests.
+// ammo: the reserve each weapon reloads from (the knife needs none); pack: what one box of it holds; max: how much you can carry
+export const AMMO_OF = ['light', 'shells', 'heavy', 'light', 'rockets', null];
+export const AMMO = {
+  light: { name: 'Light ammo', pack: 30, max: 180, color: 0xe8c33a },
+  shells: { name: 'Shells', pack: 8, max: 40, color: 0xd9452f },
+  heavy: { name: 'Heavy ammo', pack: 10, max: 40, color: 0x4c9a52 },
+  rockets: { name: 'Rockets', pack: 2, max: 6, color: 0x7a6a45 },
+};
+// heals: hp restored (bandages only patch you up to cap), seconds to use (you move at half speed and can't shoot), how many you can carry
+export const HEALS = { bandage: { name: 'Bandage', hp: 25, time: 2.2, max: 10, cap: 75 }, medkit: { name: 'Medkit', hp: 100, time: 5, max: 3 } };
+// chest guns by weight (weapon index, weight), and the color of each gun's loot beam (how good it is)
+export const CHEST_GUNS = [[0, 26], [1, 22], [2, 14], [3, 26], [4, 5]];
+export const RARITY = [0x8cc63f, 0x8cc63f, 0xb45be0, 0x2f8fe0, 0xffc83d, 0xcccccc];
+export const MAX_SLOTS = 4; // the knife plus three guns
 // game types. Aim trainer is solo only.
 export const GAMES = { ffa: 'Free-for-all', tdm: 'Team Deathmatch', br: 'Battle Royale', zombies: 'Zombies', gungame: 'Gun Game', moon: 'Moon Knives', snipe: 'Snipers Only', aim: 'Aim Trainer' };
 // gun game: two kills on each weapon, then one with the knife wins (AR, SMG, Shotgun, Sniper, RPG, Knife)
@@ -41,8 +56,8 @@ export const ACTIONS = [
   ['fwd', 'Move forward', 'KeyW'], ['back', 'Move back', 'KeyS'], ['left', 'Strafe left', 'KeyA'], ['right', 'Strafe right', 'KeyD'],
   ['jump', 'Jump', 'Space'], ['sprint', 'Sprint', 'ShiftLeft'], ['crouch', 'Crouch / slide', 'KeyC'],
   ['shoot', 'Shoot', 'Mouse0'], ['scope', 'Aim down sights', 'Mouse2'],
-  ['w1', 'Weapon 1', 'Digit1'], ['w2', 'Weapon 2', 'Digit2'], ['w3', 'Weapon 3', 'Digit3'], ['swap', 'Last weapon', 'KeyQ'],
-  ['reload', 'Reload', 'KeyR'], ['nade', 'Throw equipment', 'KeyG'], ['scores', 'Show scores', 'Tab'], ['mute', 'Mute sound', 'KeyM'],
+  ['w1', 'Weapon 1', 'Digit1'], ['w2', 'Weapon 2', 'Digit2'], ['w3', 'Weapon 3', 'Digit3'], ['w4', 'Weapon 4', 'Digit4'], ['swap', 'Last weapon', 'KeyQ'],
+  ['reload', 'Reload', 'KeyR'], ['use', 'Open chest / pick up', 'KeyE'], ['heal', 'Use heal', 'KeyH'], ['nade', 'Throw equipment', 'KeyG'], ['scores', 'Show scores', 'Tab'], ['mute', 'Mute sound', 'KeyM'],
 ];
 export const DEFAULT_BINDS = Object.fromEntries(ACTIONS.map(a => [a[0], a[2]]));
 const BLOCKED_KEYS = ['Escape', 'MetaLeft', 'MetaRight', 'OSLeft', 'OSRight', 'ContextMenu', 'F5', 'F11', 'F12'];

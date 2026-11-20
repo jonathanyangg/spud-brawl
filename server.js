@@ -11,7 +11,7 @@ import { handleApi } from './api.js';
 const PORT = process.env.PORT || 3000;
 const PUBLIC = fileURLToPath(new URL('./public/', import.meta.url));
 const MAX_PLAYERS = 12;
-const MAPS = ['depot', 'yard', 'dunes', 'frost', 'stack', 'highrise'];
+const MAPS = ['depot', 'yard', 'dunes', 'frost', 'stack', 'highrise', 'island'];
 const GAMES = ['ffa', 'tdm', 'br', 'zombies', 'gungame', 'moon', 'snipe']; // aim trainer is solo, never a room
 const DIFFS = ['easy', 'normal', 'hard'];
 const int = (v, lo, hi, d) => { const n = parseInt(v, 10); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };

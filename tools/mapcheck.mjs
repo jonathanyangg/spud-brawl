@@ -11,7 +11,7 @@ const ctx = new Proxy({}, { get: () => () => {}, set: () => true });
 globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => ctx }) };
 
 // each map is loaded on its own (as world.js would), so a broken map file only fails its own check
-const MAP_IDS = ['depot', 'yard', 'dunes', 'frost', 'stack', 'highrise'];
+const MAP_IDS = ['depot', 'yard', 'dunes', 'frost', 'stack', 'highrise', 'island'];
 const kit = await import('../public/kit.js'), { boxes, SPAWNS, STAIRS, PADS } = kit;
 const { buildNav } = await import('../public/nav.js');
 const { R, H, STEP, G } = await import('../public/config.js');

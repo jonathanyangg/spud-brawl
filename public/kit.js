@@ -12,6 +12,8 @@ export const STAIRS = [];
 export const PADS = [], PAD_R = 1.2;
 // slippery ground (ice): [x0, x1, z0, z1] at ground level
 export const ICE = [];
+// loot chests for battle royale: [x, z, floor height]. Maps that list none get some placed by the game.
+export const CHESTS = [];
 export const boxGeo = new THREE.BoxGeometry(1, 1, 1);
 export let LIMIT = 32; // inner face of the boundary wall
 
@@ -165,5 +167,5 @@ export function tower(x, z, s, deckM, stepM, railM) {
 export function clearMap(scene) {
   scene.remove(world);
   world.traverse(o => { if (o.isMesh && o.geometry !== boxGeo) o.geometry.dispose(); });
-  world.clear(); boxes.length = 0; SPAWNS.length = 0; STAIRS.length = 0; PADS.length = 0; ICE.length = 0;
+  world.clear(); boxes.length = 0; SPAWNS.length = 0; STAIRS.length = 0; PADS.length = 0; ICE.length = 0; CHESTS.length = 0;
 }
