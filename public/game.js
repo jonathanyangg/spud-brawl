@@ -2285,7 +2285,7 @@ function nearChest(e, reach = 2.2) {
 }
 function nearGun(e) {
   let best = null, bd = Infinity;
-  for (const it of CH.items) if (it.kind === 'gun' && !e.guns.some(g => g.id === it.w && (g.rar | 0) >= (it.r | 0)) && nearTo(e, it.x, it.y, it.z, 1.9)) { const d = Math.hypot(it.x - e.pos.x, it.z - e.pos.z); if (d < bd) { bd = d; best = it; } }
+  for (const it of CH.items) if (it.kind === 'gun' && nearTo(e, it.x, it.y, it.z, 1.9)) { const d = Math.hypot(it.x - e.pos.x, it.z - e.pos.z); if (d < bd) { bd = d; best = it; } }
   return best;
 }
 // with every slot full you swap the gun in your hands, so holding the knife picks nothing up
@@ -2296,9 +2296,9 @@ function useKey(p) {
   const c = nearChest(p); if (c) return openChest(c.i, p);
   const it = nearGun(p); if (!it) return;
   if (knifeFull(p)) { toast('Slots full: hold the gun you want to swap'); return; }
-  const same = p.guns.findIndex(g => g.id === it.w); // a better copy of a gun you have replaces it
-  if (same < 0 && p.guns.length < MAX_SLOTS) { giveGun(p, it.w, it.qty, undefined, it.r); takeItem(it); sfx.pick(); return; }
-  const slot = same >= 0 ? same : p.weapon, old = p.guns[slot];
+  // any three guns, doubles included: a free slot takes it, otherwise it swaps for the gun in your hands
+  if (p.guns.length < MAX_SLOTS) { giveGun(p, it.w, it.qty, undefined, it.r); takeItem(it); sfx.pick(); return; }
+  const slot = p.weapon, old = p.guns[slot];
   dropItems(p, [{ kind: 'gun', w: old.id, qty: Math.max(1, p.ammo[slot]), r: old.rar | 0 }]);
   takeItem(it); giveGun(p, it.w, it.qty, slot, it.r); switchWeapon(p, slot); sfx.pick();
   toast('Swapped for <em></em>', lootName(it), false);
@@ -2447,7 +2447,7 @@ function updateBRHud() {
     if (c) s = `${ku} · Open chest`;
     else {
       const it = nearGun(p);
-      if (it) s = knifeFull(p) ? `Slots full · hold a gun to swap for ${lootName(it)}` : `${ku} · ${p.guns.length < MAX_SLOTS && !p.guns.some(g => g.id === it.w) ? 'Pick up' : 'Swap for'} ${lootName(it)}`;
+      if (it) s = knifeFull(p) ? `Slots full · hold a gun to swap for ${lootName(it)}` : `${ku} · ${p.guns.length < MAX_SLOTS ? 'Pick up' : 'Swap for'} ${lootName(it)}`;
     }
   }
   setText('prompt', s); $('prompt').hidden = !s;
