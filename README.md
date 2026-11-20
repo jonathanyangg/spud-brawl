@@ -7,8 +7,12 @@ Arena shooter in the browser (three.js). Play vs bots offline, or online: browse
 - **Free-for-all:** first to 20.
 - **Team Deathmatch:** Blue against Red, 1v1 up to 5v5, first team to 15, 25 or 50. Bots fill the empty seats.
   Online, the room's creator picks whether players go on one team against bots, or get split evenly.
-- **Battle Royale:** one life, a storm that closes in over five phases (more damage each phase), and a kill heals
-  you 50 and refills your guns. Last one standing wins.
+- **Battle Royale:** one life. Everyone starts on a potato blimp that crosses the map: jump out over land, fall, open
+  your glider and steer down. You land with only a knife. Chests (E) hold a gun, ammo for it and sometimes a bandage
+  or medkit (H; it takes a few seconds standing still; moving cancels it). Reloads use the ammo you carry, you can hold the
+  knife and three guns, and whoever goes down drops what they had. The storm closes in over five phases, sized to the
+  map, and starts after the drop. A minimap shows the circle, the blimp's route and chests near you. Last one
+  standing wins.
 - **Zombies** (co-op waves), **Gun Game**, **Moon Knives** (knives only, low gravity), **Snipers Only** (one body shot
   kills), and a solo **Aim Trainer**.
 
@@ -24,6 +28,9 @@ pads (step on the glowing pad and it throws you up onto a ledge or roof).
 - **Stackyard:** a small container yard: stacks two and three high, containers you run through, catwalks, a crane.
 - **Highrise:** a city block: a parking garage, walk-ups with fire escapes, a plaza over an underpass, an elevated
   train line and an office tower.
+- **Spud Island:** a 240 m island for battle royale, ringed by sea cliffs: Spudville (houses, a chapel, a bell tower),
+  Radio Hill, Mash Farm (a barn with a loft and a silo), Peel Fort on a plateau, Fry Port (stacked containers, a crane,
+  a lighthouse) and Tater Camp, with woods, fields and lone huts between them.
 
 Bots and zombies find their way round walls on a ground grid (`public/nav.js`), change floors by the stairs and
 jump pads, and zombies climb walls to reach anyone above them.
@@ -98,7 +105,7 @@ Off by default; [SETUP.md](SETUP.md) lists the steps and env vars that switch th
 
 The server decides everything that touches coins: it checks your Supabase token on every call, picks spin prizes and prices, and writes through atomic Postgres functions. Coin packs are credited only by Stripe's signed webhook, once per payment.
 
-Music can be turned off in the menu; **M** mutes everything.
+Music can be turned off in the menu; **K** mutes everything (rebind it in Controls).
 
 ## Online play
 

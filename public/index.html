@@ -32,7 +32,11 @@
     <ul id="feed"></ul>
     <div id="cross"><i></i><i></i><i></i><i></i><b></b></div>
     <svg id="hitm" viewBox="0 0 30 30" aria-hidden="true"><g stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="3" y1="3" x2="10" y2="10"/><line x1="27" y1="3" x2="20" y2="10"/><line x1="3" y1="27" x2="10" y2="20"/><line x1="27" y1="27" x2="20" y2="20"/></g></svg>
-    <div id="reloadTxt" hidden>Reloading</div>
+    <div id="reloadTxt" hidden><b>Reloading <em id="reloadLeft"></em></b><span><i id="reloadFill"></i></span></div>
+    <div id="prompt" hidden></div>
+    <div id="lookTag" hidden><b id="lookName"></b><small id="lookStats"></small></div>
+    <div id="useBar" hidden><b id="useName">Bandage</b><span><i id="useFill"></i></span></div>
+    <canvas id="minimap" width="360" height="360" hidden aria-label="Map"></canvas>
     <div id="toast"></div>
     <div id="xpPop" aria-hidden="true"></div>
     <div id="banner" role="status" aria-live="polite"></div>
@@ -40,6 +44,7 @@
       <div class="lbl">Health</div>
       <div id="hpnum">100</div>
       <div class="bar"><div id="hpbar"></div></div>
+      <div id="heals" hidden></div>
     </div>
     <div id="wbox" class="panel">
       <div id="wname">SMG</div>
@@ -327,7 +332,25 @@
       <h2 id="deathBy">Killed</h2>
       <p id="deathHow"></p>
       <p id="deathCount">Back in 4</p>
+      <div class="row" id="deathBtns" hidden>
+        <button class="btn" id="deathAgain" type="button">Play again</button>
+        <button class="btn ghost" id="deathMenu" type="button">Main menu</button>
+      </div>
+      <small id="deathKeys" hidden>or press Enter to play again</small>
     </div>
+  </div>
+
+  <div id="inv" hidden>
+    <div class="invBox">
+      <div class="invHead"><b>Inventory</b><small id="invHint"></small></div>
+      <p class="invLbl">Guns <small>drag to reorder, click to hold</small></p>
+      <div id="invGuns"></div>
+      <div class="invCols">
+        <div><p class="invLbl">Ammo</p><div id="invAmmo"></div></div>
+        <div><p class="invLbl">Heals</p><div id="invHeals"></div></div>
+      </div>
+    </div>
+    <div id="invTip" hidden></div>
   </div>
 
   <div class="overlay" id="board" hidden>

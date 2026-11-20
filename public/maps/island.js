@@ -1,6 +1,22 @@
-import { world, T, lambert, addBox, crate, ground, perimeter, stairs, wall, slab, hut, tower, win } from '../kit.js';
+import { world, T, lambert, addBox as kAddBox, crate as kCrate, ground, perimeter, stairs as kStairs, wall as kWall, slab as kSlab, hut as kHut, tower as kTower, win } from '../kit.js';
 
-// ---------- Spud Island: the battle royale map, 160 x 160 (two and a half times a normal map each way) ----------
+// The places below are laid out round the middle and then pushed out from it by SPREAD (1.5), so there's open
+// ground between them; buildings keep their size. Every builder call adds the offset of the place it's in.
+const SPREAD = 1.5;
+let OX = 0, OZ = 0;
+const at = (cx, cz) => { OX = (SPREAD - 1) * cx; OZ = (SPREAD - 1) * cz; }; // the place centred on (cx, cz) moves out to SPREAD x that
+const addBox = (x, z, ...r) => kAddBox(x + OX, z + OZ, ...r);
+const crate = (x, z, ...r) => kCrate(x + OX, z + OZ, ...r);
+const hut = (x, z, ...r) => kHut(x + OX, z + OZ, ...r);
+const tower = (x, z, ...r) => kTower(x + OX, z + OZ, ...r);
+const stairs = (x, z, dx, dz, n, y0, mat, rise, run, w, via) => kStairs(x + OX, z + OZ, dx, dz, n, y0, mat, rise, run, w, via && via.map(([vx, vz]) => [vx + OX, vz + OZ]));
+const slab = (x0, x1, z0, z1, top, mat, hole) => kSlab(x0 + OX, x1 + OX, z0 + OZ, z1 + OZ, top, mat, hole && [hole[0] + OX, hole[1] + OX, hole[2] + OZ, hole[3] + OZ]);
+const wall = (axis, a, b, c, y, h, mat, gaps = [], t) => {
+  const du = axis === 'x' ? OX : OZ, dc = axis === 'x' ? OZ : OX;
+  return kWall(axis, a + du, b + du, c + dc, y, h, mat, gaps.map(([g, ...r]) => [g + du, ...r]), t);
+};
+
+// ---------- Spud Island: the battle royale map, 240 x 240 (three and a half times a normal map each way) ----------
 // Ringed by sea cliffs. Six places worth landing at, with open fields, woods and lone huts between them:
 //   Spudville (north): a main street of roof-terrace houses, a plaza with a fountain and a ruined chapel.
 //   Radio Hill (centre): a two-level radio tower, the highest point you can stand on (8.5 m), and two bunkers.
@@ -11,7 +27,8 @@ import { world, T, lambert, addBox, crate, ground, perimeter, stairs, wall, slab
 // Every chest is listed in `chests` ([x, z, floor height]); the game spawns and fills them.
 // Decorations (trees, rocks) come from a fixed seed, so every player online gets the same island.
 export default function island() {
-  const A = 80;
+  const A = 120;
+  OX = OZ = 0;
   let seed = 7331;
   const sr = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
   const sb = (a, b) => a + sr() * (b - a);
@@ -31,11 +48,13 @@ export default function island() {
   ground(T.grass());
   perimeter(M.cliff, 10, A);
   const chests = [], spawns = [];
-  const chest = (x, z, y = 0) => chests.push([x, z, y]);
+  const chest = (x, z, y = 0) => chests.push([x + OX, z + OZ, y]);
+  const spawn = (...pts) => spawns.push(...pts.map(([x, z]) => [x + OX, z + OZ]));
   const deco = (x, z, w, d, h, y, m) => addBox(x, z, w, d, h, y, m, false);
   // a flat strip on the ground from (x0, z0) to (x1, z1), any angle (only for looks)
   const strip = (x0, z0, x1, z1, w, m, y = 0.01) => {
-    const L = Math.hypot(x1 - x0, z1 - z0), s = deco((x0 + x1) / 2, (z0 + z1) / 2, w, L, 0.02, y, m);
+    [x0, z0, x1, z1] = [x0, z0, x1, z1].map(v => v * SPREAD); const ox = OX, oz = OZ; OX = OZ = 0; // roads stretch with the gaps
+    const L = Math.hypot(x1 - x0, z1 - z0), s = deco((x0 + x1) / 2, (z0 + z1) / 2, w, L, 0.02, y, m); OX = ox; OZ = oz;
     s.rotation.y = Math.atan2(x1 - x0, z1 - z0); s.castShadow = false;
   };
   // the sea round the cliffs, and a beach under them
@@ -71,11 +90,12 @@ export default function island() {
   function tree(x, z, pine) {
     addBox(x, z, 0.7, 0.7, pine ? 3 : 3.6, 0, M.trunk);
     const s = sb(0.85, 1.35);
-    if (pine) for (let k = 0; k < 3; k++) { const c = new THREE.Mesh(coneG, M.pine); c.position.set(x, 3 + k * 1.6 * s, z); c.scale.setScalar(s * (1 - k * 0.22)); c.castShadow = true; world.add(c); }
-    else { const l = new THREE.Mesh(leafG, sr() < 0.5 ? M.leaf : M.leaf2); l.position.set(x, 4.6 * s, z); l.scale.set(s, s * sb(0.85, 1.15), s); l.castShadow = true; world.add(l); }
+    if (pine) for (let k = 0; k < 3; k++) { const c = new THREE.Mesh(coneG, M.pine); c.position.set(x + OX, 3 + k * 1.6 * s, z + OZ); c.scale.setScalar(s * (1 - k * 0.22)); c.castShadow = true; world.add(c); }
+    else { const l = new THREE.Mesh(leafG, sr() < 0.5 ? M.leaf : M.leaf2); l.position.set(x + OX, 4.6 * s, z + OZ); l.scale.set(s, s * sb(0.85, 1.15), s); l.castShadow = true; world.add(l); }
   }
 
   // ---------- Spudville (north) ----------
+  at(0, -44);
   strip(-34, -42, 34, -42, 6, M.road); strip(0, -39, 0, -4, 5, M.road);
   const town = [[-24, -52, 's', M.plaster, 1], [-12, -52, 's', M.plaster2, 1], [12, -52, 's', M.plaster3, -1], [24, -52, 's', M.plaster, -1],
     [-24, -32, 'n', M.plaster3, 1], [-12, -32, 'n', M.plaster, 1], [12, -32, 'n', M.plaster2, -1], [24, -32, 'n', M.plaster3, -1]];
@@ -100,9 +120,10 @@ export default function island() {
   deco(-38, -48, 3.2, 3.2, 2.4, 3.4, M.metal);
   for (const [x, z] of [[34, -44], [38, -38]]) { addBox(x, z, 3.2, 1, 1.1, 0, M.wood); deco(x, z, 3.8, 2.6, 0.08, 2.7, M.red); }
   chest(36, -41);
-  spawns.push([-30, -42], [-6, -42], [6, -42], [30, -42], [0, -36], [-18, -47], [18, -37]);
+  spawn([-30, -42], [-6, -42], [6, -42], [30, -42], [0, -36], [-18, -47], [18, -37]);
 
   // ---------- Radio Hill (centre) ----------
+  at(0, 0);
   addBox(0, 8, 10, 10, 0.3, 3.95, M.metal); // the first deck, top 4.25
   for (const x of [-4.85, 4.85]) for (const z of [3.15, 12.85]) addBox(x, z, 0.3, 0.3, 3.95, 0, M.dark);
   stairs(12.5, 8, -1, 0, 10, 0, M.step, 0.425, 0.75, 2);
@@ -117,9 +138,10 @@ export default function island() {
   // two bunkers
   for (const [x, z, door] of [[-14, 14, 'e'], [14, -2, 'w']]) { hut(x, z, 6, 5, 2.4, M.stone, door); addBox(x, z, 6.6, 5.6, 0.4, 2.4, M.stone); chest(x, z); }
   for (const [x, z] of [[-9, 2], [9, 16], [-6, 18], [16, 10]]) addBox(x, z, 2.8, 0.8, 1.1, 0, M.stone); // sandbags
-  spawns.push([0, 20], [-12, 4], [10, 2], [20, 14], [-18, 22]);
+  spawn([0, 20], [-12, 4], [10, 2], [20, 14], [-18, 22]);
 
   // ---------- Mash Farm (west) ----------
+  at(-48, 4);
   strip(-34, 6, -6, 6, 5, M.road); strip(-50, 12, -50, 30, 4, M.road);
   // the barn: doors at both ends, a hayloft over the north half, stairs up from inside
   wall('x', -57, -43, -10, 0, 7, M.barn, [[-50, 4, 0, 4]]);
@@ -134,7 +156,7 @@ export default function island() {
   chest(-50, -6, 3.4); chest(-44.8, -4, 3.4); chest(-52, 4);
   // silo and farmhouse
   addBox(-38, -8, 4.4, 4.4, 12, 0, M.metal);
-  { const c = new THREE.Mesh(new THREE.SphereGeometry(2.6, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), M.metal); c.position.set(-38, 12, -8); world.add(c); }
+  { const c = new THREE.Mesh(new THREE.SphereGeometry(2.6, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), M.metal); c.position.set(-38 + OX, 12, -8 + OZ); world.add(c); }
   chest(-38, -4.6);
   house(-64, 24, 8, 8, 'n', M.plaster2, 0, 1); chest(-66, 22); chest(-64, 24, 3.4);
   // the field: a fence with gaps and hay bales for cover
@@ -143,9 +165,10 @@ export default function island() {
   for (const [x, z] of [[-40, 22], [-34, 25], [-30, 21], [-38, 28.5], [-30, 29]]) addBox(x, z, 1.6, 1.2, 1.2, 0, M.hay);
   chest(-35, 21.5);
   addBox(-60, 8, 3, 1.8, 1.4, 0, M.red); addBox(-61, 8, 1.2, 1.6, 2.4, 0, M.red); // tractor
-  spawns.push([-50, 14], [-34, 0], [-60, -2], [-36, 14], [-52, 34]);
+  spawn([-50, 14], [-34, 0], [-60, -2], [-36, 14], [-52, 34]);
 
   // ---------- Peel Fort (north-east) ----------
+  at(48, -42);
   addBox(48, -42, 28, 24, 3, 0, M.stone);
   stairs(48, -24.6, 0, -1, 6, 0, M.step, 0.5, 0.9, 3); stairs(28.6, -42, 1, 0, 6, 0, M.step, 0.5, 0.9, 3);
   stairs(48, -59.4, 0, 1, 6, 0, M.step, 0.5, 0.9, 3); stairs(67.4, -42, -1, 0, 6, 0, M.step, 0.5, 0.9, 3);
@@ -155,9 +178,10 @@ export default function island() {
   house(46, -44, 9, 8, 's', M.stone, 3, 1);
   chest(48.5, -46, 3); chest(46, -44, 6.4); chest(37, -51, 3); chest(59, -33, 3); chest(40, -36, 0 + 3);
   for (const [x, z] of [[38, -33], [58, -51], [56, -36]]) addBox(x, z, 2.4, 1, 1.2, 3, M.stone);
-  spawns.push([48, -20], [24, -42], [68, -28], [36, -62]);
+  spawn([48, -20], [24, -42], [68, -28], [36, -62]);
 
   // ---------- Fry Port (south-east) ----------
+  at(48, 52);
   strip(6, 14, 30, 34, 5, M.road);
   for (const [x, m] of [[32, M.c1], [40, M.c2], [54, M.c3], [62, M.c4]]) box(x, 34, 0, m);
   for (const [x, m] of [[32, M.c3], [40, M.c4], [54, M.c1], [62, M.c2]]) box(x, 40, 0, m);
@@ -177,43 +201,51 @@ export default function island() {
   chest(60, 64, 3);
   addBox(72, 72, 3.6, 3.6, 9, 0, M.white); deco(72, 72, 3.8, 3.8, 1.2, 4, M.red); deco(72, 72, 2.4, 2.4, 1.6, 9, M.c4);
   for (const x of [54, 64]) addBox(x, 70.6, 0.6, 0.6, 0.8, 0, M.dark);
-  spawns.push([48, 30], [30, 56], [58, 58], [70, 30], [24, 44]);
+  spawn([48, 30], [30, 56], [58, 58], [70, 30], [24, 44]);
 
   // ---------- Tater Camp (south-west) ----------
+  at(-50, 52);
   strip(-6, 14, -40, 46, 4, M.road);
   for (const [x, z, door] of [[-58, 40, 'e'], [-38, 40, 'w'], [-56, 62, 'n'], [-34, 60, 'n']]) { cabin(x, z, door); chest(x, z); }
   tower(-48, 50, 1, M.wood, M.step, M.dark); chest(-48, 50, 3);
   tower(-68, 68, 1, M.wood, M.step, M.dark); chest(-68, 68, 3);
   for (const [x, z, w, d] of [[-44, 56, 3.2, 0.6], [-50, 45, 0.6, 3.2], [-62, 52, 3.4, 0.7]]) addBox(x, z, w, d, 0.7, 0, M.trunk); // logs
   for (let i = 0; i < 6; i++) deco(-44 + Math.cos(i) * 0.9, 44 + Math.sin(i) * 0.9, 0.35, 0.35, 0.3, 0, M.stone);
-  spawns.push([-46, 34], [-30, 50], [-62, 46], [-44, 66]);
+  spawn([-46, 34], [-30, 50], [-62, 46], [-44, 66]);
 
   // ---------- lone spots ----------
   // a gas station on the road east of Radio Hill
+  at(33, -7);
   for (const [x, z] of [[27, -10], [33, -10], [27, -4], [33, -4]]) addBox(x, z, 0.35, 0.35, 4, 0, M.white);
   deco(30, -7, 8, 8, 0.4, 4, M.red);
   for (const z of [-8.5, -5.5]) addBox(30, z, 0.8, 0.6, 1.4, 0, M.dark);
   hut(40, -7, 6, 6, 3, M.plaster, 'w'); addBox(40, -7, 6.6, 6.6, 0.3, 3, M.roof); chest(41, -7); chest(30, -7);
   // shacks
-  for (const [x, z, door] of [[-22, 30, 'n'], [18, 30, 's'], [-28, -18, 'e'], [22, -22, 'w']]) { cabin(x, z, door); chest(x, z); }
+  for (const [x, z, door] of [[-22, 30, 'n'], [18, 30, 's'], [-28, -18, 'e'], [22, -22, 'w']]) { at(x, z); cabin(x, z, door); chest(x, z); }
   // the ruins east of the hill
+  at(63, 8);
   wall('x', 58, 68, 4, 0, 3, M.brick, [[61, 2, 0, 9]]); wall('z', 4.2, 12, 68, 0, 2.2, M.brick); wall('x', 62, 68, 12, 0, 1.4, M.brick);
-  chest(64, 8); chest(-70, -50); chest(-12, 70); chest(10, 56); chest(-66, -20);
-  spawns.push([30, 4], [-22, 38], [18, 22], [-36, -22], [56, 14], [-70, -60], [-10, 62], [10, 64], [-70, 0], [70, -6]);
+  chest(64, 8);
+  for (const [x, z] of [[-70, -50], [-12, 70], [10, 56], [-66, -20]]) { at(x, z); chest(x, z); }
+  for (const [x, z] of [[30, 4], [-22, 38], [18, 22], [-36, -22], [56, 14], [-70, -60], [-10, 62], [10, 64], [-70, 0], [70, -6]]) { at(x, z); spawn([x, z]); }
+  // the open ground between places gets a few more shacks with a chest each
+  OX = OZ = 0;
+  for (const [x, z, door] of [[-60, -78, 'e'], [100, -100, 'w'], [100, -30, 'w'], [-98, 22, 'e'], [-8, 100, 'n'], [-104, -104, 'e'], [-30, -96, 's'], [40, 104, 'n']]) { cabin(x, z, door); chest(x, z); spawn([x + 5, z + 5]); }
 
   // ---------- trees and rocks, kept out of the places above ----------
   const keepOut = [[-36, 36, -70, -24], [-20, 20, -6, 22], [-72, -24, -14, 36], [26, 72, -64, -18], [22, 78, 26, 80], [-72, -26, 30, 74],
     [22, 46, -14, 0], [-28, -14, 24, 36], [12, 26, 24, 36], [-34, -22, -24, -12], [16, 28, -28, -16], [54, 72, 0, 16], [-6, 6, -40, 0]];
+  for (const k of keepOut) for (let i = 0; i < 4; i++) k[i] *= SPREAD;
   const free = (x, z, pad) => !keepOut.some(([x0, x1, z0, z1]) => x > x0 - pad && x < x1 + pad && z > z0 - pad && z < z1 + pad)
     && ![...chests, ...spawns].some(([cx, cz]) => Math.hypot(cx - x, cz - z) < 3 + pad);
   const placed = [];
-  for (let i = 0, n = 0; i < 600 && n < 90; i++) {
+  for (let i = 0, n = 0; i < 1600 && n < 210; i++) {
     const x = sb(-A + 4, A - 4), z = sb(-A + 4, A - 4);
     if (!free(x, z, 1.5) || placed.some(([px, pz]) => Math.hypot(px - x, pz - z) < 5)) continue;
     placed.push([x, z]); n++;
     tree(x, z, z > 30 || sr() < 0.25);
   }
-  for (let i = 0, n = 0; i < 400 && n < 30; i++) {
+  for (let i = 0, n = 0; i < 1000 && n < 70; i++) {
     const x = sb(-A + 5, A - 5), z = sb(-A + 5, A - 5);
     if (!free(x, z, 2) || placed.some(([px, pz]) => Math.hypot(px - x, pz - z) < 4)) continue;
     placed.push([x, z]); n++;
@@ -222,5 +254,5 @@ export default function island() {
   // a beach strip along the cliff foot, for looks
   for (const [x, z, w, d] of [[0, -A + 1.2, 2 * A, 2.4], [0, A - 1.2, 2 * A, 2.4], [-A + 1.2, 0, 2.4, 2 * A], [A - 1.2, 0, 2.4, 2 * A]]) { const s = deco(x, z, w, d, 0.02, 0.01, M.sand); s.castShadow = false; }
 
-  return { sky: 0x9fd0ee, fog: [90, 250], spawns, chests, half: A - 6 };
+  return { sky: 0x9fd0ee, fog: [110, 320], spawns, chests, half: A - 6 };
 }

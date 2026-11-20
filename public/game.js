@@ -1,6 +1,7 @@
 // Spud Brawl: a free-for-all arena shooter. three.js is loaded as a global by index.html.
-import { G, JUMP, R, H, EYE, STEP, SCORE_LIMIT, MOVE, WEAPONS, KNIFE, SNIPER, THROWABLES, GAMES, GUNGAME, DIFF, BOT_NAMES, HATS, TEAM_COLORS, TEAM_NAMES, PLAYER_COLOR, WNAMES, ACTIONS, DEFAULT_BINDS, validCode, keyName } from './config.js';
-import { MAPS, boxes, SPAWNS, STAIRS, PADS, PAD_R, ICE, boxGeo, loadMap, currentMap, HALF, LIMIT } from './world.js';
+import { G, JUMP, R, H, EYE, STEP, SCORE_LIMIT, MOVE, WEAPONS, KNIFE, SNIPER, THROWABLES, GAMES, GUNGAME, DIFF, BOT_NAMES, HATS, TEAM_COLORS, TEAM_NAMES, PLAYER_COLOR, WNAMES, ACTIONS, DEFAULT_BINDS, validCode, keyName,
+  AMMO_OF, AMMO, HEALS, CHEST_GUNS, RARITY, MAX_SLOTS } from './config.js';
+import { MAPS, boxes, SPAWNS, STAIRS, PADS, PAD_R, ICE, CHESTS, boxGeo, loadMap, currentMap, HALF, LIMIT } from './world.js';
 import { buildNav, navToward } from './nav.js';
 import { initAudio, sfxShot, sfx, toggleMute, setVolume } from './audio.js';
 import { joinRoom } from './net.js';
@@ -30,7 +31,16 @@ function saveProgress() { try { localStorage.setItem(PROGRESS_KEY, JSON.stringif
 // this callsign hits 1.5x as hard (guns and frags)
 const isMuted = name => String(name || '').trim().toLowerCase() === 'amimutted';
 const binds = { ...DEFAULT_BINDS };
-if (settings.binds && typeof settings.binds === 'object') for (const k in DEFAULT_BINDS) if (validCode(settings.binds[k])) binds[k] = settings.binds[k];
+if (settings.binds && typeof settings.binds === 'object') {
+  const sb = settings.binds;
+  if (!settings.bindsV) { // v2: inventory on Tab, map on M, so scores and mute moved
+    if (sb.inv === 'KeyI') delete sb.inv;
+    if (sb.scores === 'Tab') delete sb.scores;
+    if (sb.mute === 'KeyM') delete sb.mute;
+  }
+  for (const k in DEFAULT_BINDS) if (validCode(sb[k])) binds[k] = sb[k];
+}
+settings.bindsV = 2;
 
 const bound = a => keys[binds[a]] === true;
 function actionFor(code) { for (const k in binds) if (binds[k] === code) return k; return null; }
@@ -57,7 +67,7 @@ sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, { left: -42, right: 42, top: 42, bottom: -42, near: 1, far: 130 });
 sun.shadow.bias = -0.0008;
-scene.add(sun);
+scene.add(sun); scene.add(sun.target);
 
 // view-model scene (rendered on top so the gun never clips into walls)
 const vmScene = new THREE.Scene();
@@ -338,7 +348,7 @@ function newEntity(name, color, isPlayer, guns = WEAPONS) {
     kills: 0, deaths: 0, lastHurt: -99, respawnAt: Infinity, weapon: 0, prevWeapon: 1, ammo: guns.map(w => w.mag), streak: 0,
     reloading: false, reloadEnd: 0, nextShot: 0, nadeReady: 0, protectUntil: 0, mesh: null, flash: 0, bob: 0, bumped: false,
     crouch: 0, slideK: 0, slide: 0, slideReady: 0, slideDir: new V3(), sprint: false, sprintBlock: 0, stunUntil: 0, blindUntil: 0, nade: 'frag',
-    remote: false, peer: null, m: 1 };
+    remote: false, peer: null, m: 1, res: {}, heals: { bandage: 0, medkit: 0 }, useT: null, drop: null };
 }
 // teams: the team of each bot (team deathmatch), or nothing
 function setupBots(n, diff, teams) {
@@ -385,10 +395,12 @@ function respawn(e) {
   e.hp = 100; e.alive = true; e.reloading = false; e.ammo = e.guns.map(w => w.mag); e.streak = 0;
   e.crouch = e.slideK = e.slide = 0; e.sprint = e.crouchOn = false;
   e.yaw = Math.atan2(e.pos.x, e.pos.z) + rand(-0.4, 0.4); e.pitch = 0; e.protectUntil = now + 1.5; e.lastHurt = -99;
+  e.res = { light: 0, shells: 0, heavy: 0, rockets: 0 }; e.heals = { bandage: 0, medkit: 0 }; e.useT = null; e.drop = null; e.landedAt = -99; e.hurtBy = null;
   if (!e.isPlayer) {
     e.ai.target = null; e.ai.visible = false; e.ai.goal = null; e.climb = null;
-    e.mesh.visible = true; e.mesh.position.copy(e.pos);
+    e.mesh.visible = true; e.mesh.position.copy(e.pos); setCanopy(e, false); e.ai.loot = null;
   }
+  if (oneLife()) startDrop(e);
 }
 
 // ---------- game types ----------
@@ -399,6 +411,7 @@ function gunsFor(e) {
   if (game === 'gungame') return [arm(GUNGAME[Math.min(GUNGAME.length - 1, Math.floor(e.kills / 2))])];
   if (game === 'moon') return [arm(KNIFE)];
   if (game === 'snipe') return [{ ...arm(SNIPER), dmg: 100 }]; // one body shot
+  if (game === 'br') return [arm(KNIFE)]; // the rest is in the chests
   if (e.isPlayer) return P.loadoutWeapons(prog);
   return [0, 1, 2, 3].sort(() => Math.random() - 0.5).slice(0, 3).map(i => WEAPONS[i]);
 }
@@ -442,13 +455,15 @@ function gunGameStep(e) {
 // ---------- combat ----------
 function startReload(e) {
   const w = e.guns[e.weapon];
-  if (e.reloading || e.ammo[e.weapon] >= w.mag) return;
-  e.reloading = true; e.reloadEnd = now + w.reload; e.reloadWeapon = e.weapon;
+  if (e.reloading || e.useT || e.ammo[e.weapon] >= w.mag) return;
+  const at = AMMO_OF[w.id];
+  if (carries(e) && at && !(e.res[at] > 0)) { if (e.isPlayer && now > (e.noAmmoAt || 0)) { toast('Out of <em></em>', AMMO[at].name, false); e.noAmmoAt = now + 1.5; } return; }
+  e.reloading = true; e.reloadStart = now; e.reloadEnd = now + w.reload; e.reloadWeapon = e.weapon;
   if (e.isPlayer) sfx.reload();
 }
 function switchWeapon(e, i) {
   if (i === e.weapon || i < 0 || i >= e.guns.length) return;
-  e.prevWeapon = e.weapon; e.weapon = i; e.reloading = false;
+  e.prevWeapon = e.weapon; e.weapon = i; e.reloading = false; e.useT = null;
   e.nextShot = Math.max(e.nextShot, now + 0.3);
   if (e.isPlayer) { vm.switchT = 0.3; refreshVM(); }
   if (e.ammo[i] <= 0) startReload(e);
@@ -469,7 +484,8 @@ const _o = new V3(), _f = new V3(), _h = new V3(), _b = new V3();
 const BLOOD = [0x8b1a1a, 0x6a1212];
 function tryFire(e) {
   const w = e.guns[e.weapon], melee = w.kind === 'melee';
-  if (now < e.nextShot || e.reloading) return false;
+  if (now < e.nextShot || e.reloading || e.drop) return false;
+  if (e.useT) e.useT = null; // shooting stops a heal
   if (!melee && e.ammo[e.weapon] <= 0) { startReload(e); return false; }
   if (!melee) e.ammo[e.weapon]--;
   e.nextShot = now + w.rate; if (!melee) e.sprintBlock = now + 0.35;
@@ -507,7 +523,7 @@ function hitscan(shooter, o, d, w, muzzle, acc) {
   const melee = w.kind === 'melee', pad = melee ? 0.3 : 0;
   let best = rayWorld(o, d, w.range), target = null, zone = null, aimHit = null;
   for (const t of ents) {
-    if (t === shooter || !t.alive || (game === 'zombies' && !t.zombie && !shooter.zombie) || sameTeam(t, shooter)) continue; // no friendly fire
+    if (t === shooter || !t.alive || t.drop || (game === 'zombies' && !t.zombie && !shooter.zombie) || sameTeam(t, shooter)) continue; // no friendly fire
     const k = poseK(t);
     for (const [y, r, z] of HITS) {
       const th = raySphere(o, d, _h.set(t.pos.x, t.pos.y + y * k, t.pos.z), r + pad);
@@ -535,8 +551,8 @@ function hitscan(shooter, o, d, w, muzzle, acc) {
   return hit;
 }
 function damage(t, amt, src, wname, head, pt) {
-  if (t.remote || !t.alive || now < t.protectUntil) return;
-  t.hp -= amt; t.lastHurt = now; t.flash = 0.12;
+  if (t.remote || !t.alive || t.drop || now < t.protectUntil) return;
+  t.hp -= amt; t.lastHurt = now; t.flash = 0.12; if (src && src !== t) t.hurtBy = src;
   if (pt) burst(pt, BLOOD, head ? 6 : 3, 3, 0.07, 0.5);
   if (src && src.isPlayer && t !== src) { hitMarker(head, t.hp <= 0); head ? sfx.head() : sfx.hit(); }
   if (t.isPlayer) { sfx.hurt(); if (src && src !== t) { dmgFrom = src; dmgT = 1; } shake = Math.max(shake, 0.12); }
@@ -555,14 +571,16 @@ function kill(t, src, wname, head) {
   bodyC(t, _b); burst(_b, [...BLOOD, new THREE.Color(t.color).getHex()], 14, 5, 0.1, 0.9);
   corpse(t);
   if (t.mesh) t.mesh.visible = false;
+  if (oneLife()) { dropAll(t); t.useT = null; }
   t.respawnAt = (t.isPlayer && game === 'zombies') || oneLife() ? Infinity : now + (t.isPlayer ? 4 : 3); // zombies: back next wave
-  if (!self) killReward(src);
   if (t.isPlayer) {
     deathPos.copy(camera.position); killer = self ? null : src;
     $('deathBy').textContent = wname === 'Storm' ? 'The storm got you' : self ? `Killed by your own ${wname === 'RPG' ? 'rocket' : wname.toLowerCase()}` : 'Killed by ' + src.name;
     $('deathHow').textContent = wname === 'Storm' ? 'Stay inside the circle.' : self ? 'Aim it a little further away.' : wname + (head ? ' \u00b7 headshot' : '');
     if (oneLife()) $('deathHow').textContent += ` \u00b7 you placed #${brAlive().length + 1}`;
     $('death').hidden = false; $('scope').hidden = true;
+    $('deathBtns').hidden = $('deathKeys').hidden = mode === 'online';
+    if (mode !== 'online') { closeInv(false); if (document.pointerLockElement) document.exitPointerLock(); }
   }
   if (src && src.isPlayer && !self) { sfx.kill(); toast(`Eliminated <em></em>`, t.name, head); if (state === 'playing') awardKill(wname, head); }
   if (t.isPlayer && mode === 'online') netEvent('x', self ? '' : idOf(src), WNAMES.indexOf(wname), head ? 1 : 0);
@@ -613,7 +631,7 @@ function updateNades(dt) {
       const wall = rayWorld(prev, dir, len);
       n.pos.addScaledVector(dir, Math.min(wall, len));
       let hit = wall < len;
-      if (!hit) for (const t of ents) if (t.alive && t !== n.owner && bodyC(t, _b).distanceTo(n.pos) < 0.9) { hit = true; break; }
+      if (!hit) for (const t of ents) if (t.alive && !t.drop && t !== n.owner && bodyC(t, _b).distanceTo(n.pos) < 0.9) { hit = true; break; }
       n.m.position.copy(n.pos); n.m.lookAt(_h.copy(n.pos).add(n.vel));
       if (Math.random() < 0.7) burst(prev, [0xb0aca4, 0xd8d4cc], 1, 0.5, 0.12, 0.45);
       if (hit || now >= n.fuse) { if (hit) n.pos.addScaledVector(dir, -0.2); detonate(n); scene.remove(n.m); nades.splice(i, 1); }
@@ -637,7 +655,7 @@ function updateNades(dt) {
 }
 function detonate(n) {
   if (n.type === 'frag') explode(n.pos, n.owner, 'Frag', 115, 6.5);
-  else if (n.type === 'rocket') explode(n.pos, n.owner, 'RPG', 150, 5.5);
+  else if (n.type === 'rocket') { const g = n.owner && n.owner.guns && n.owner.guns.find(x => x.id === 4); explode(n.pos, n.owner, 'RPG', 150 * RARITY[g && oneLife() ? g.rar | 0 : 0].dmg, 5.5); }
   else if (n.type === 'stun') stunBlast(n.pos, n.owner);
   else flashBlast(n.pos, n.owner);
 }
@@ -764,6 +782,7 @@ function randomGoal() {
 }
 function updateBot(b, dt) {
   if (!b.alive) { if (now >= b.respawnAt) respawn(b); return; }
+  if (b.drop) return botDrop(b, dt);
   const ai = b.ai, w = b.guns[b.weapon];
   const blind = now < b.blindUntil, stunned = now < b.stunUntil;
   if (blind) ai.visible = false; // flashed: can't pick anyone out, just wanders
@@ -771,7 +790,8 @@ function updateBot(b, dt) {
     ai.nextScan = now + 0.22;
     let best = null, bd = Infinity;
     for (const t of ents) {
-      if (t === b || !t.alive || sameTeam(t, b)) continue;
+      if (t === b || !t.alive || t.drop || sameTeam(t, b)) continue;
+      if (t.ai && oneLife() && now - b.landedAt < LOOT_WINDOW && b.hurtBy !== t) continue; // fresh off the blimp: loot, leave other bots be
       let d = t.pos.distanceTo(b.pos) * (t.isPlayer ? 0.85 : 1);
       if (d < 55 && d < bd && canSee(b, t)) { bd = d; best = t; }
     }
@@ -789,7 +809,13 @@ function updateBot(b, dt) {
 
   const wish = new V3();
   const tgt = ai.visible ? ai.target : null;
-  if (tgt) {
+  // battle royale: a bot with only its knife goes for a gun before it picks a fight it can't reach
+  // and with only a knife it fights another knife, or anyone within 4 m; from a gun it backs off while it loots
+  const knifeOnly = oneLife() && b.guns.length === 1, tdist = tgt ? tgt.pos.distanceTo(b.pos) : 0;
+  const engage = tgt && (!knifeOnly || tdist < 4 || b.hurtBy === tgt);
+  const threat = tgt && !engage && knifeOnly && tgt.guns.length > 1 && tdist < 20 ? tgt : null;
+  if (oneLife() && !tgt && b.hp < 65 && !b.useT) startHeal(b);
+  if (engage) {
     const to = new V3(tgt.pos.x - b.pos.x, 0, tgt.pos.z - b.pos.z); const dist = to.length(); to.divideScalar(dist || 1);
     if (now > ai.strafeSwitch) { ai.strafeDir = Math.random() < 0.5 ? -1 : 1; ai.strafeSwitch = now + rand(0.5, 1.6); }
     wish.set(-to.z * ai.strafeDir, 0, to.x * ai.strafeDir);
@@ -798,7 +824,8 @@ function updateBot(b, dt) {
     if (now > ai.nextJump && b.onGround && Math.random() < dt * 0.6) { b.vel.y = JUMP; ai.nextJump = now + 1.2; }
     if (b.ammo[b.weapon] < w.mag * 0.25 && !b.reloading && dist > 20) startReload(b);
   } else {
-    const chasing = now - ai.lastSeenAt < 6;
+    const chasing = now - ai.lastSeenAt < 6 && !knifeOnly;
+    if (oneLife()) botLoot(b, ai);
     if (oneLife() && storm.on && Math.hypot(b.pos.x - storm.x, b.pos.z - storm.z) > storm.r - 3 && (!ai.goal || Math.hypot(ai.goal.x - storm.tx, ai.goal.z - storm.tz) > storm.tr)) ai.goal = null; // run from the storm
     if (!ai.goal || now > ai.goalExpire || (Math.hypot(ai.goal.x - b.pos.x, ai.goal.z - b.pos.z) < 1.5 && Math.abs(ai.goal.y - b.pos.y) < 1.5)) {
       if (chasing) { ai.goal = ai.lastSeen.clone(); ai.lastSeenAt = -99; } // chase the last sighting once, then wander
@@ -808,6 +835,11 @@ function updateBot(b, dt) {
     const wp = navPoint(b, stairWaypoint(b, ai.goal) || ai.goal);
     wish.set(wp.x - b.pos.x, 0, wp.z - b.pos.z);
     if (!b.reloading && b.ammo[b.weapon] < w.mag) startReload(b);
+    if (threat) { // keep heading for loot, but bend away from the gun
+      if (wish.lengthSq() > 0.0001) wish.normalize();
+      const away = new V3(b.pos.x - threat.pos.x, 0, b.pos.z - threat.pos.z); away.divideScalar(away.length() || 1);
+      wish.addScaledVector(away, 1.4 * (1 - tdist / 20) + 0.4);
+    }
   }
   if (wish.lengthSq() > 0.0001) wish.normalize();
 
@@ -821,7 +853,7 @@ function updateBot(b, dt) {
     ai.lastPos.copy(b.pos); ai.stuckAt = now + 0.7;
   }
 
-  const speed = 6.4 * (stunned ? 0.45 : 1), k = b.launched ? 0 : (b.onGround ? 10 * grip(b) : 2.5) * dt;
+  const speed = 6.4 * (stunned ? 0.45 : 1) * (b.useT ? 0 : 1), k = b.launched ? 0 : (b.onGround ? 10 * grip(b) : 2.5) * dt;
   b.vel.x += (wish.x * speed - b.vel.x) * Math.min(1, k);
   b.vel.z += (wish.z * speed - b.vel.z) * Math.min(1, k);
   moveEntity(b, dt);
@@ -843,9 +875,48 @@ function updateBot(b, dt) {
       else if (!w.auto) ai.burstPause = now + rand(0.1, 0.5);
     }
   }
-  if (now - b.lastHurt > 5 && b.hp < 100) b.hp = Math.min(100, b.hp + 10 * dt);
+  if (!oneLife() && now - b.lastHurt > 5 && b.hp < 100) b.hp = Math.min(100, b.hp + 10 * dt);
 
   poseSoldier(b, dt);
+}
+// ---------- first-person heal ----------
+// a bandage you wind round your arm, or a medkit you open and use, in place of the gun
+const healVM = { root: new THREE.Group(), bandage: new THREE.Group(), medkit: new THREE.Group() };
+{
+  const M = c => new THREE.MeshLambertMaterial({ color: c }), white = M(0xf4f1e8), red = M(0xd9452f), skin = M(0xe0b48a), sleeve = M(0x5d6b3a);
+  const bx = (g, m, w, h, d, x, y, z) => { const b = new THREE.Mesh(boxGeo, m); b.scale.set(w, h, d); b.position.set(x, y, z); g.add(b); return b; };
+  // bandage: the left forearm held across, a roll in the right hand going round it
+  const arm = new THREE.Group(); arm.rotation.set(0.15, 0, 1.25); healVM.bandage.add(arm);
+  bx(arm, sleeve, 0.11, 0.42, 0.11, 0, -0.08, 0); bx(arm, skin, 0.1, 0.24, 0.1, 0, 0.24, 0);
+  healVM.wrap = bx(arm, white, 0.115, 0.02, 0.115, 0, 0.18, 0); // the wound wrap grows as you go
+  healVM.roll = new THREE.Group(); healVM.bandage.add(healVM.roll);
+  const rl = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.07, 12), white); rl.rotation.z = Math.PI / 2; healVM.roll.add(rl);
+  bx(healVM.roll, skin, 0.07, 0.07, 0.1, 0.06, -0.05, 0.02);
+  // medkit: an open case held low in both hands
+  bx(healVM.medkit, white, 0.34, 0.16, 0.22, 0, 0, 0);
+  bx(healVM.medkit, red, 0.16, 0.012, 0.05, 0, 0.086, 0); bx(healVM.medkit, red, 0.05, 0.012, 0.16, 0, 0.086, 0);
+  healVM.lid = new THREE.Group(); healVM.lid.position.set(0, 0.08, -0.11); healVM.medkit.add(healVM.lid);
+  bx(healVM.lid, white, 0.34, 0.03, 0.22, 0, 0.015, 0.11);
+  for (const s of [-1, 1]) { bx(healVM.medkit, sleeve, 0.1, 0.1, 0.36, s * 0.2, -0.04, 0.2); bx(healVM.medkit, skin, 0.08, 0.08, 0.1, s * 0.19, -0.02, 0.02); }
+  healVM.root.add(healVM.bandage, healVM.medkit); healVM.root.scale.setScalar(0.6); healVM.root.visible = false; vmScene.add(healVM.root);
+}
+function poseHealVM(u) {
+  const t = now - u.start, k = clamp(t / (u.end - u.start), 0, 1);
+  const up = Math.min(1, t / 0.25) * Math.min(1, (u.end - now) / 0.2 + 0.3); // comes up, dips at the end
+  const med = u.type === 'medkit';
+  healVM.bandage.visible = !med; healVM.medkit.visible = med;
+  healVM.root.position.set(0.04, -0.5 + 0.24 * up + Math.sin(now * 3) * 0.006, -0.7);
+  if (med) {
+    healVM.root.rotation.set(0.5, 0, Math.sin(now * 2.2) * 0.05);
+    healVM.lid.rotation.x = -Math.min(1, t / 0.5) * 1.9; // open the case
+    healVM.medkit.position.y = Math.max(0, Math.sin(now * 9)) * 0.02 * (k > 0.15 ? 1 : 0); // working on it
+  } else {
+    healVM.root.rotation.set(0.25, 0, 0);
+    const a = now * 9; // the roll circles the forearm while the wrap grows along it
+    healVM.roll.position.set(-0.05 + k * 0.1 + Math.cos(a) * 0.09, 0.02 + Math.sin(a) * 0.07, -0.02 + Math.sin(a) * 0.05);
+    healVM.roll.rotation.x = a;
+    healVM.wrap.scale.y = 0.02 + k * 0.2; healVM.wrap.position.y = 0.17 - k * 0.1;
+  }
 }
 // ---------- first-person view model ----------
 const vm = { root: new THREE.Group(), guns: [], kick: 0, switchT: 0, flashUntil: 0, swayX: 0, swayY: 0, bob: 0, ads: 0, spr: 0 };
@@ -980,9 +1051,15 @@ function requestLock() {
 document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === canvas;
   if (locked) { plWorks = true; if (state === 'paused') setState('playing'); }
-  else if (state === 'playing') { setState('paused'); }
+  else if (state === 'playing' && !invOpen && player.alive) { setState('paused'); } // dead: the mouse is free for the death screen buttons
 });
 document.addEventListener('pointerlockerror', () => { if (plWorks !== true) plWorks = false; });
+// back from the dead in a bot game: take the mouse again (or ask for a click if the browser says no)
+function relockAfterDeath() {
+  if (locked || plWorks === false || state !== 'playing') return;
+  requestLock();
+  setTimeout(() => { if (!locked && state === 'playing' && player.alive) toast('Click to keep playing'); }, 400);
+}
 document.addEventListener('mousemove', e => {
   if (state !== 'playing' || !player.alive) return;
   if (locked || (plWorks === false && e.buttons)) {
@@ -994,6 +1071,8 @@ document.addEventListener('mousemove', e => {
 canvas.addEventListener('mousedown', e => {
   if (state !== 'playing') return;
   initAudio();
+  if (invOpen) { closeInv(); return; }
+  if (!player.alive && mode !== 'online') return;
   if (!locked && plWorks !== false) { requestLock(); return; }
   pressCode('Mouse' + e.button);
 });
@@ -1006,16 +1085,24 @@ function pressCode(code) {
   if (a === 'shoot') { fireLatch = true; triggerUsed = false; }
   if (a === 'scores') { buildTable($('boardTbl')); $('board').hidden = false; }
   if (!player.alive || !a) return;
+  if (player.drop) { if (a === 'jump') dropPress(player); return; }
   if (a === 'w1') switchWeapon(player, 0);
   else if (a === 'w2') switchWeapon(player, 1);
   else if (a === 'w3') switchWeapon(player, 2);
+  else if (a === 'w4') switchWeapon(player, 3);
+  else if (a === 'use') useKey(player);
+  else if (a === 'bandage' || a === 'medkit') startHeal(player, a);
+  else if (a === 'inv') openInv();
+  else if (a === 'map') toggleBigMap();
   else if (a === 'swap') switchWeapon(player, player.prevWeapon);
+  else if (a === 'slotL') moveSlot(player, -1);
+  else if (a === 'slotR') moveSlot(player, 1);
   else if (a === 'reload') startReload(player);
   else if (a === 'nade') throwNade(player);
   else if (a === 'crouch') crouchTap = true;
 }
 canvas.addEventListener('contextmenu', e => e.preventDefault());
-document.addEventListener('wheel', e => { const n = player.guns.length; if (state === 'playing' && player.alive) switchWeapon(player, (player.weapon + (e.deltaY > 0 ? 1 : n - 1)) % n); }, { passive: true });
+document.addEventListener('wheel', e => { const n = player.guns.length; if (state === 'playing' && player.alive && !player.drop) switchWeapon(player, (player.weapon + (e.deltaY > 0 ? 1 : n - 1)) % n); }, { passive: true });
 // Ctrl+W/T/N can't be blocked in a page, so a crouch bound to Ctrl could close the tab: ask first while in a match
 addEventListener('beforeunload', e => { if (state === 'playing') e.preventDefault(); });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; $('board').hidden = true; });
@@ -1024,7 +1111,15 @@ document.addEventListener('keydown', e => {
   if (e.code === binds.mute && !e.repeat) { toast(toggleMute() ? 'Sound off' : 'Sound on'); }
   if (state !== 'playing') return;
   if (e.code.startsWith('Arrow') || actionFor(e.code)) e.preventDefault();
+  if (invOpen) {
+    if (!e.repeat && (e.code === binds.inv || e.code === 'Escape')) { e.preventDefault(); closeInv(); return; }
+    const a = actionFor(e.code);
+    if (['fwd', 'back', 'left', 'right', 'jump', 'sprint', 'crouch'].includes(a)) keys[e.code] = true;
+    else if (!e.repeat && (a === 'bandage' || a === 'medkit')) startHeal(player, a);
+    return;
+  }
   if (e.code === 'Escape' && plWorks === false) { setState('paused'); return; }
+  if (e.code === 'Enter' && !e.repeat && !player.alive && mode !== 'online') { e.preventDefault(); playAgain(); return; }
   if (e.repeat) return;
   pressCode(e.code);
 });
@@ -1052,9 +1147,10 @@ function renderKeyHelp() {
     `${kb(binds.fwd)}${kb(binds.left)}${kb(binds.back)}${kb(binds.right)} Move`,
     `${kb(binds.jump)} Jump`, `${kb(binds.sprint)} Sprint`, `${kb(binds.crouch)} Crouch \u00b7 slide while sprinting`,
     `${kb(binds.shoot)} Shoot`, `${kb(binds.scope)} Aim down sights`,
-    `${kb(binds.w1)}${kb(binds.w2)}${kb(binds.w3)} ${kb(binds.swap)} Switch weapon`,
+    `${kb(binds.w1)}${kb(binds.w2)}${kb(binds.w3)}${kb(binds.w4)} ${kb(binds.swap)} Switch weapon`,
+    `${kb(binds.use)} Open chest \u00b7 pick up &nbsp;${kb(binds.bandage)} Bandage &nbsp;${kb(binds.medkit)} Medkit &nbsp;${kb(binds.slotL)}${kb(binds.slotR)} Reorder guns &nbsp;${kb(binds.inv)} Inventory (battle royale)`,
     `${kb(binds.reload)} Reload`, `${kb(binds.nade)} Throw equipment`,
-    `${kb(binds.scores)} Scores &nbsp;${kb(binds.mute)} Mute`,
+    `${kb(binds.map)} Full map &nbsp;${kb(binds.scores)} Scores &nbsp;${kb(binds.mute)} Mute`,
   ].map(s => `<div>${s}</div>`).join('');
 }
 function startRebind(k) {
@@ -1106,7 +1202,7 @@ function updatePlayer(dt) {
     $('deathCount').textContent = game === 'zombies' ? 'Back next wave' : oneLife() ? `Out \u00b7 ${brAlive().length} left` : 'Back in ' + Math.max(1, left);
     camera.position.lerp(_o.copy(deathPos).add(new V3(0, 3, 0)), 1 - Math.pow(0.1, dt));
     if (killer && killer.alive) camera.lookAt(killer.pos.x, killer.pos.y + 1, killer.pos.z);
-    if (now >= p.respawnAt) { respawn(p); $('death').hidden = true; refreshVM(); }
+    if (now >= p.respawnAt) { respawn(p); $('death').hidden = true; refreshVM(); relockAfterDeath(); }
     return;
   }
   const turn = 2.4 * dt;
@@ -1116,6 +1212,8 @@ function updatePlayer(dt) {
   const sy = Math.sin(p.yaw), cy = Math.cos(p.yaw);
   const wish = new V3(-sy * f + cy * s, 0, -cy * f - sy * s);
   if (wish.lengthSq() > 0) wish.normalize();
+  if (p.drop) { zoomed = false; fireLatch = false; updateDrop(p, dt, wish); dropCamera(p, dt); return; }
+  hideSelf();
   const w = p.guns[p.weapon], firing = bound('shoot') || fireLatch;
   zoomed = bound('scope') && !p.reloading && w.kind !== 'melee';
 
@@ -1166,7 +1264,7 @@ function updatePlayer(dt) {
   moveEntity(p, dt);
   if (firing && (w.auto || !triggerUsed) && tryFire(p)) triggerUsed = true;
   fireLatch = false; // a tap shorter than one frame still fires
-  if (now - p.lastHurt > 5 && p.hp < 100) p.hp = Math.min(100, p.hp + 12 * dt);
+  if (!oneLife() && now - p.lastHurt > 5 && p.hp < 100) p.hp = Math.min(100, p.hp + 12 * dt);
 
   const sp = Math.hypot(p.vel.x, p.vel.z);
   if (p.onGround) vm.bob += dt * sp * 1.6;
@@ -1176,6 +1274,107 @@ function updatePlayer(dt) {
   if (shake > 0 && !reduceMotion) camera.position.add(new V3(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(shake * 0.3));
 }
 
+// on the blimp the camera sits behind it and you look around; once you jump it follows behind you so you see
+// yourself fall and glide, and on landing it's your own eyes again
+let selfMesh = null;
+function hideSelf() { if (selfMesh) selfMesh.visible = false; }
+function dropCamera(p, dt = 0) {
+  fwdVec(p.yaw, p.pitch, _f);
+  if (p.drop && p.drop.stage === 'ride' && FLIGHT.mesh) {
+    hideSelf();
+    camera.position.copy(FLIGHT.mesh.position).addScaledVector(_f, -26); camera.position.y += 5;
+  } else if (p.drop) {
+    if (!selfMesh) selfMesh = soldierMesh('', p.color, true, { uniform: prog.uniform, camo: prog.camo[p.guns[p.weapon].id] });
+    const keep = p.mesh; p.mesh = selfMesh; selfMesh.visible = true;
+    poseSoldier(p, dt); setCanopy(p, p.drop.stage === 'glide'); p.mesh = keep;
+    camera.position.set(p.pos.x, p.pos.y + 1.6, p.pos.z).addScaledVector(_f, -6); camera.position.y += 1.2;
+  } else { hideSelf(); camera.position.set(p.pos.x, p.pos.y + EYE, p.pos.z); }
+  camera.rotation.set(p.pitch, p.yaw, 0);
+}
+// battle royale: move the gun in your hands one slot left or right (the knife can move too)
+function moveSlot(e, dir) { if (oneLife()) swapSlots(e, e.weapon, e.weapon + dir); }
+function swapSlots(e, i, j) {
+  if (i === j || i < 0 || j < 0 || i >= e.guns.length || j >= e.guns.length) return;
+  [e.guns[i], e.guns[j]] = [e.guns[j], e.guns[i]]; [e.ammo[i], e.ammo[j]] = [e.ammo[j], e.ammo[i]];
+  const fix = k => (k === i ? j : k === j ? i : k); // the gun in your hands stays in your hands
+  e.weapon = fix(e.weapon); e.prevWeapon = fix(e.prevWeapon);
+  if (e.reloading) e.reloadWeapon = fix(e.reloadWeapon);
+  if (e.isPlayer) dressVM();
+}
+
+// ---------- inventory (battle royale) ----------
+// opens over the game (which keeps running) and frees the mouse: guns you can drag into a new order or click to hold,
+// with their numbers on hover, and the ammo and heals you carry
+let invOpen = false, invKey = '', invDrag = -1;
+function openInv() {
+  const p = player;
+  if (!oneLife() || !p.alive || p.drop || state !== 'playing') return;
+  invOpen = true; invKey = ''; renderInv(); $('inv').hidden = false;
+  fireLatch = false; zoomed = false;
+  if (document.pointerLockElement) document.exitPointerLock();
+}
+function closeInv(relock = true) {
+  if (!invOpen) return;
+  invOpen = false; $('inv').hidden = true; $('invTip').hidden = true; invDrag = -1;
+  if (relock && state === 'playing' && plWorks !== false) requestLock();
+}
+const gunStats = g => {
+  const R = RARITY[g.rar | 0], at = AMMO_OF[g.id];
+  return [['Damage', `${Math.round(g.dmg)}${g.pellets > 1 ? ' \u00d7 ' + g.pellets : ''}`], ['Headshot', '\u00d7' + g.head],
+    ['Fire rate', `${(1 / g.rate).toFixed(1)}/s`], ['Magazine', g.kind === 'melee' ? '\u2013' : String(g.mag)],
+    ['Reload', g.kind === 'melee' ? '\u2013' : g.reload.toFixed(1) + 's'], ['Range', g.range + ' m'],
+    ['Ammo', at ? AMMO[at].name : 'none'], ['Rarity', g.kind === 'melee' ? '\u2013' : R.name]];
+};
+function renderInv() {
+  const p = player, slots = $('invGuns');
+  invKey = [p.weapon, ...p.guns.map((g, i) => g.name + (g.rar | 0) + ':' + p.ammo[i]), JSON.stringify(p.res), JSON.stringify(p.heals)].join('|');
+  slots.textContent = '';
+  for (let i = 0; i < MAX_SLOTS; i++) {
+    const g = p.guns[i], el = document.createElement('div');
+    if (!g) { el.className = 'invGun empty'; el.textContent = 'Empty'; slots.append(el); continue; }
+    el.className = 'invGun' + (i === p.weapon ? ' on' : ''); el.draggable = true; el.dataset.i = i;
+    if (g.kind !== 'melee') el.style.setProperty('--rar', rarCss(g.rar));
+    const at = AMMO_OF[g.id], line = (c, t) => { const s = document.createElement('div'); s.className = c; s.textContent = t; el.append(s); };
+    line('k', i < 4 ? keyName(binds['w' + (i + 1)] || '') : ''); line('n', g.name);
+    line('r', g.kind === 'melee' ? 'Melee' : RARITY[g.rar | 0].name);
+    if (at) line('a', `${p.ammo[i]} / ${g.mag} \u00b7 ${p.res[at] | 0} spare`);
+    el.addEventListener('mouseenter', ev => showTip(g, ev)); el.addEventListener('mousemove', ev => moveTip(ev));
+    el.addEventListener('mouseleave', () => { $('invTip').hidden = true; });
+    el.addEventListener('click', () => { switchWeapon(p, i); renderInv(); });
+    el.addEventListener('dragstart', ev => { invDrag = i; el.classList.add('drag'); $('invTip').hidden = true; ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', String(i)); });
+    el.addEventListener('dragend', () => { invDrag = -1; renderInv(); });
+    el.addEventListener('dragover', ev => { if (invDrag >= 0) { ev.preventDefault(); el.classList.add('over'); } });
+    el.addEventListener('dragleave', () => el.classList.remove('over'));
+    el.addEventListener('drop', ev => { ev.preventDefault(); if (invDrag >= 0) swapSlots(p, invDrag, i); invDrag = -1; renderInv(); });
+    slots.append(el);
+  }
+  const row = (box, color, name, have, max, use) => {
+    const r = document.createElement(use ? 'button' : 'div'); r.className = 'invItem';
+    if (use) { r.classList.add('invUse'); r.title = 'Click to use'; r.disabled = !(have > 0); r.addEventListener('click', () => { closeInv(); startHeal(player, use); }); }
+    const sw = document.createElement('i'); sw.style.background = color; const n = document.createElement('b'); n.textContent = name;
+    const c = document.createElement('span'); c.textContent = `${have | 0} / ${max}`; r.append(sw, n, c); box.append(r);
+  };
+  const am = $('invAmmo'); am.textContent = '';
+  for (const k of AMMO_KEYS) row(am, '#' + AMMO[k].color.toString(16).padStart(6, '0'), AMMO[k].name, p.res[k], AMMO[k].max);
+  const hl = $('invHeals'); hl.textContent = '';
+  row(hl, '#f4f1e8', `Bandages (${keyName(binds.bandage)})`, p.heals.bandage, HEALS.bandage.max, 'bandage');
+  row(hl, '#d9452f', `Medkits (${keyName(binds.medkit)})`, p.heals.medkit, HEALS.medkit.max, 'medkit');
+  const note = document.createElement('div'); note.className = 'invItem'; note.textContent = 'Click one to use it. Stand still.'; note.style.color = 'var(--muted)'; note.style.fontSize = '11px'; hl.append(note);
+  $('invHint').textContent = `${keyName(binds.inv)} or Esc to close`;
+}
+function showTip(g, ev) {
+  const tip = $('invTip'); tip.textContent = '';
+  tip.style.setProperty('--rar', g.kind === 'melee' ? '#bbb' : rarCss(g.rar));
+  const h = document.createElement('b'); h.textContent = (g.kind === 'melee' ? '' : RARITY[g.rar | 0].name + ' ') + g.name; tip.append(h);
+  for (const [k, v] of gunStats(g)) { const r = document.createElement('div'), a = document.createElement('span'), b = document.createElement('b'); a.textContent = k; b.textContent = v; b.style.cssText = 'font-size:12px;margin:0;color:var(--cream)'; r.append(a, b); tip.append(r); }
+  tip.hidden = false; moveTip(ev);
+}
+function moveTip(ev) { const t = $('invTip'); t.style.left = Math.min(innerWidth - 200, ev.clientX + 14) + 'px'; t.style.top = Math.min(innerHeight - 200, ev.clientY + 14) + 'px'; }
+function updateInv() {
+  if (!invOpen) return;
+  if (state !== 'playing' || !player.alive || !oneLife()) { closeInv(false); return; }
+  if (invDrag < 0) { const p = player, k = [p.weapon, ...p.guns.map((g, i) => g.name + (g.rar | 0) + ':' + p.ammo[i]), JSON.stringify(p.res), JSON.stringify(p.heals)].join('|'); if (k !== invKey) renderInv(); }
+}
 // natural end: you stay crouched; cancelled: you stand (if there's room)
 function endSlide(p, natural) {
   p.slide = 0; p.slideReady = now + MOVE.slideCooldown;
@@ -1241,13 +1440,24 @@ function updateHUD(dt) {
   const p = player, w = p.guns[p.weapon];
   setText('hpnum', String(Math.ceil(p.hp)));
   const hpb = $('hpbar'); hpb.style.width = p.hp + '%'; hpb.style.backgroundColor = p.hp < 35 ? 'var(--ketchup)' : p.hp < 65 ? 'var(--butter)' : 'var(--herb)';
-  setText('wname', w.name);
-  const ammo = $('ammo'), s = w.kind === 'melee' ? 'melee' : `${p.ammo[p.weapon]}|${w.mag}`;
-  if (txtCache.get('ammo') !== s) { txtCache.set('ammo', s); ammo.innerHTML = w.kind === 'melee' ? '&ndash;' : `${p.ammo[p.weapon]} <small>/ ${w.mag}</small>`; }
-  const slotKey = p.guns.map(g => g.name).join();
+  setText('wname', w.name); $('wname').style.color = oneLife() && w.kind !== 'melee' ? rarCss(w.rar) : '';
+  const spare = carries(p) && AMMO_OF[w.id] ? p.res[AMMO_OF[w.id]] | 0 : w.mag; // battle royale shows what you carry
+  const ammo = $('ammo'), s = w.kind === 'melee' ? 'melee' : `${p.ammo[p.weapon]}|${spare}`;
+  if (txtCache.get('ammo') !== s) { txtCache.set('ammo', s); ammo.innerHTML = w.kind === 'melee' ? '&ndash;' : `${p.ammo[p.weapon]} <small>/ ${spare}</small>`; }
+  // each slot shows the key you bound to it
+  const br = oneLife(), sk = i => keyName(binds['w' + (i + 1)] || '');
+  const slotKey = [br, ...p.guns.map(g => g.name + (g.rar | 0)), ...[1, 2, 3, 4].map(i => binds['w' + i])].join();
   if (txtCache.get('slots') !== slotKey) {
     txtCache.set('slots', slotKey); $('slots').textContent = '';
-    p.guns.forEach((g, i) => { const sp = document.createElement('span'); sp.textContent = `${i + 1} ${g.name}`; $('slots').append(sp); });
+    p.guns.forEach((g, i) => {
+      const sp = document.createElement('span'); sp.textContent = i < 4 ? `${sk(i)} ${g.name}` : g.name;
+      if (br && g.kind !== 'melee') { // battle royale: each slot wears its gun's rarity color
+        const R = RARITY[g.rar | 0];
+        sp.classList.add('rar'); sp.style.setProperty('--rar', rarCss(g.rar)); sp.title = R.name;
+        const r = document.createElement('small'); r.textContent = R.name; sp.append(r);
+      }
+      $('slots').append(sp);
+    });
   }
   [...$('slots').children].forEach((el, i) => el.classList.toggle('on', i === p.weapon));
   $('nade').hidden = !nadesOn();
@@ -1257,11 +1467,17 @@ function updateHUD(dt) {
   $('stunFx').style.opacity = now < p.stunUntil ? clamp((p.stunUntil - now) / 1.5, 0, 0.8) : 0;
   if (game === 'zombies' || game === 'aim' || oneLife()) updateScoreTop();
   $('reloadTxt').hidden = !p.reloading;
+  if (p.reloading) {
+    const T = Math.max(0.01, p.reloadEnd - p.reloadStart);
+    $('reloadFill').style.width = (100 * clamp((now - p.reloadStart) / T, 0, 1)).toFixed(1) + '%';
+    setText('reloadLeft', Math.max(0, p.reloadEnd - now).toFixed(1) + 's');
+  }
   $('scope').hidden = !(zoomed && w.scope && p.alive && camera.fov < 40);
   // crosshair gap matches the real spread cone
   const px = (host.clientHeight / 2) / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
   $('cross').style.setProperty('--gap', (3 + currentSpread(p) * px).toFixed(1) + 'px');
-  $('cross').style.opacity = zoomed || !p.alive ? 0 : 1;
+  $('cross').style.opacity = zoomed || !p.alive || p.drop ? 0 : 1;
+  updateBRHud();
   hitT = Math.max(0, hitT - dt); $('hitm').style.opacity = hitT > 0 ? Math.min(1, hitT * 6) : 0;
   const since = now - p.lastHurt;
   $('hurt').style.opacity = clamp((since < 0.5 ? 0.6 * (1 - since / 0.5) : 0) + (p.alive && p.hp < 35 ? 0.25 + 0.1 * Math.sin(now * 5) : 0), 0, 1);
@@ -1373,7 +1589,7 @@ function netSend(force) {
   net.room.presence({ v: 1, n: p.name, c: p.color, m: net.m,
     p: [r2(p.pos.x), r2(p.pos.y), r2(p.pos.z)], yw: r2(p.yaw), pt: r2(p.pitch), w: p.guns[p.weapon].id,
     a: state === 'playing' && p.alive ? 1 : 0, dd: p.alive ? 0 : 1, hp: Math.ceil(p.hp), k: p.kills, d: p.deaths, ev: net.ev,
-    cr: r2(p.crouch), sl: r2(p.slideK), tm: p.team,
+    cr: r2(p.crouch), sl: r2(p.slideK), tm: p.team, dr: p.drop ? DROP_ST.indexOf(p.drop.stage) : 0,
     bt: botHost() ? botState() : undefined, sto: botHost() && oneLife() ? stormState() : undefined, tsc: botHost() && teamsOn() ? teamScore() : undefined,
     sk: prog.uniform, cm: prog.camo[p.guns[p.weapon].id], lv: P.level(prog), su: p.guns[p.weapon].sup ? 1 : 0,
     z: game === 'zombies' && zHost() ? zombieState() : undefined });
@@ -1392,7 +1608,7 @@ function startOnline(code) {
       player.color = teamsOn() ? TEAM_COLORS[player.team] : myHat;
       setHost(host);
       if (map !== currentMap) setMap(map);
-      if (changed || map !== currentMap || net.map !== settings.map) { respawn(player); refreshVM(); }
+      if (changed || map !== currentMap || net.map !== settings.map) { resetBR(); respawn(player); refreshVM(); }
       leaderCache = null; updateScoreTop(); netSend(true);
       updateNetStatus();
     },
@@ -1430,7 +1646,8 @@ function applyRemote(id, s) {
     if (state === 'playing') toast(`<em></em> joined`, name, false);
     updateNetStatus();
   }
-  r.target.set(clamp(num(s.p[0]), -32, 32), clamp(num(s.p[1]), 0, 20), clamp(num(s.p[2]), -32, 32));
+  const pl = LIMIT * 1.5; // riders on the blimp can be past the edge, and high up
+  r.target.set(clamp(num(s.p[0]), -pl, pl), clamp(num(s.p[1]), 0, 120), clamp(num(s.p[2]), -pl, pl));
   r.tyaw = num(s.yw); r.pitch = clamp(num(s.pt), -1.5, 1.5); r.weapon = clamp(s.w | 0, 0, WEAPONS.length - 1);
   r.hp = num(s.hp); r.kills = Math.max(0, s.k | 0); r.deaths = Math.max(0, s.d | 0); r.m = s.m | 0;
   r.dead = s.dd === 1; // a: in play right now; dd: actually down (paused players are neither)
@@ -1449,6 +1666,7 @@ function applyRemote(id, s) {
   const alive = s.a === 1;
   if (alive && !r.alive) { r.alive = true; r.pos.copy(r.target); r.yaw = r.tyaw; r.mesh.visible = true; poseSoldier(r, 0); }
   else if (!alive && r.alive) { r.alive = false; r.mesh.visible = false; }
+  remoteDrop(r, s.dr);
   const last = net.lastSeq.get(id) || 0; let max = last;
   for (const e of (Array.isArray(s.ev) ? s.ev : [])) {
     const sq = num(e && e[0]); if (!(sq > last)) continue;
@@ -1484,21 +1702,35 @@ function handleNetEvent(r, e) {
     if (b) remoteDied(b, byId(e[3]), wname(e[4]), e[5] === 1);
   } else if (type === 'n') {
     const t = NADE_TYPES[clamp(e[8] | 0, 0, NADE_TYPES.length - 1)], v = c => clamp(num(c), -60, 60);
-    const pos = new V3(clamp(num(e[2]), -40, 40), clamp(num(e[3]), -5, 40), clamp(num(e[4]), -40, 40));
+    const nl = LIMIT + 10, pos = new V3(clamp(num(e[2]), -nl, nl), clamp(num(e[3]), -5, 130), clamp(num(e[4]), -nl, nl));
     spawnNade(pos, new V3(v(e[5]), v(e[6]), v(e[7])), r, t);
     if (t === 'rocket') sfxShot(4, distVol(r.pos));
+  } else if (type === 'c') {
+    openChest(e[2] | 0, r, true);
+  } else if (type === 'pk') {
+    const it = CH.byId.get(String(e[2])); if (it) takeItem(it, true);
+  } else if (type === 'dp' && oneLife()) {
+    const pl = LIMIT * 1.5;
+    spillItems(r.peer + ':' + num(e[0]), decItems(e.slice(5).map(num)), clamp(num(e[2]), -pl, pl), clamp(num(e[3]), 0, 120), clamp(num(e[4]), -pl, pl));
   } else if (type === 'zx') {
     // the zombie host says I got a zombie kill
     if (e[2] === net.myPeer && state === 'playing') { player.kills++; sfx.kill(); awardKill(wname(e[3]), e[4] === 1); updateScoreTop(); }
   }
 }
 const wname = i => WNAMES[clamp(i | 0, 0, WNAMES.length - 1)];
+// someone else's drop stage (0 on the ground, then ride, fall, glide): hidden on the blimp, canopy while gliding, can't be hit
+function remoteDrop(r, v) {
+  const st = DROP_ST[clamp(v | 0, 0, 3)];
+  r.drop = st ? { stage: st } : null;
+  if (r.alive) r.mesh.visible = st !== 'ride';
+  setCanopy(r, st === 'glide');
+}
 function remoteDied(r, k, wname, head) {
   r.alive = false; r.mesh.visible = false;
   bodyC(r, _b); burst(_b, [...BLOOD, new THREE.Color(r.color).getHex()], 14, 5, 0.1, 0.9);
   corpse(r);
   addFeed(k, r, wname, head);
-  if (k === player && state === 'playing') { player.kills++; gunGameStep(player); killReward(player); sfx.kill(); toast(`Eliminated <em></em>`, r.name, head); awardKill(wname, head); netSend(true); }
+  if (k === player && state === 'playing') { player.kills++; gunGameStep(player); sfx.kill(); toast(`Eliminated <em></em>`, r.name, head); awardKill(wname, head); netSend(true); }
   else if (k && k.ai) { k.kills++; gunGameStep(k); } // a bot I run got them
   leaderCache = null; updateScoreTop(); checkWinOnline();
 }
@@ -1522,12 +1754,12 @@ function checkWinOnline() {
 const myBot = id => (typeof id === 'string' ? ents.find(e => e.ai && 'b' + e.bid === id) : null);
 const byId = id => (!id ? null : id === net.myPeer ? player : net.remotes.get(id) || net.bots.get(id) || myBot(id) || null);
 const humansInMatch = () => [player, ...[...net.remotes.values()].filter(r => r.m === net.m)];
-// [id, name, team (-1 none), x, y, z, yaw, pitch, weapon, alive, kills, deaths, fired since last time, crouch, hp]
+// [id, name, team (-1 none), x, y, z, yaw, pitch, weapon, alive, kills, deaths, fired since last time, crouch, hp, drop stage]
 function botState() {
   return ents.filter(e => e.ai).map(b => {
     const f = b.fired ? 1 : 0; b.fired = false;
     return [b.bid, b.name, b.team === undefined ? -1 : b.team, r2(b.pos.x), r2(b.pos.y), r2(b.pos.z), r2(b.yaw), r2(b.pitch), b.guns[b.weapon].id,
-      b.alive ? 1 : 0, b.kills, b.deaths, f, r2(b.crouch), Math.ceil(b.hp)];
+      b.alive ? 1 : 0, b.kills, b.deaths, f, r2(b.crouch), Math.ceil(b.hp), b.drop ? DROP_ST.indexOf(b.drop.stage) : 0];
   });
 }
 function syncBots(list) {
@@ -1544,11 +1776,13 @@ function syncBots(list) {
       b.mesh = soldierMesh(name, b.color, true, randomLook()); b.mesh.visible = false;
       net.bots.set(id, b); ents.push(b); leaderCache = null;
     }
-    b.target.set(clamp(num(a[3]), -32, 32), clamp(num(a[4]), 0, 20), clamp(num(a[5]), -32, 32));
+    const pl = LIMIT * 1.5;
+    b.target.set(clamp(num(a[3]), -pl, pl), clamp(num(a[4]), 0, 120), clamp(num(a[5]), -pl, pl));
     b.tyaw = num(a[6]); b.pitch = clamp(num(a[7]), -1.5, 1.5); b.weapon = clamp(a[8] | 0, 0, WEAPONS.length - 1);
     b.kills = Math.max(0, a[10] | 0); b.deaths = Math.max(0, a[11] | 0); b.crouch = clamp(num(a[13]), 0, 1); b.hp = clamp(num(a[14]), 0, 100);
     if (a[9] === 1 && !b.alive) { b.alive = true; b.pos.copy(b.target); b.yaw = b.tyaw; b.mesh.visible = true; poseSoldier(b, 0); }
     else if (a[9] !== 1 && b.alive) { b.alive = false; b.mesh.visible = false; }
+    remoteDrop(b, a[15]);
     if (a[12] === 1 && b.alive) botShotFx(b);
   }
   for (const [id, b] of net.bots) if (!seen.has(id)) removeNetBot(b);
@@ -1657,7 +1891,7 @@ function joinCode(code) {
 const GAME_HELP = {
   ffa: 'Everyone for themselves. First to 20 eliminations wins.',
   tdm: 'Blue against Red. Every elimination scores for your team; first team to the target wins. No friendly fire.',
-  br: 'One life each. The storm closes in, so keep moving. Last soldier standing wins.',
+  br: 'One life each. Ride the potato blimp, jump out over the island and glide down. You land with a knife: open chests for guns, ammo and heals. The storm closes in, so keep moving. Last one standing wins.',
   zombies: 'Team up against waves of zombies. Downed players come back each wave. Online, everyone in the room plays together.',
   gungame: 'Every two kills hands you the next weapon: AR, SMG, Shotgun, Sniper, RPG, then the knife. One knife kill wins.',
   moon: 'Knives only, in low gravity. Jump high, stab fast. First to 20.',
@@ -1673,21 +1907,24 @@ const GAME_HELP = {
 const PHASES = [[25, 20, 30, 3], [20, 18, 19, 5], [18, 16, 11, 8], [15, 14, 5, 12], [12, 12, 0, 18]]; // wait s, shrink s, next radius, damage/s
 const storm = { on: false, x: 0, z: 0, r: 48, fx: 0, fz: 0, fr: 48, tx: 0, tz: 0, tr: 30, phase: 0, waitEnd: 0, shrinkEnd: 0, dps: 2, tick: 0, mesh: null };
 function resetStorm() {
-  storm.on = oneLife(); storm.phase = -1; storm.x = storm.z = 0; storm.r = 48;
+  storm.on = oneLife(); storm.phase = -1; storm.x = storm.z = 0; storm.r = LIMIT * 1.45;
   if (storm.on) nextPhase();
   if (!storm.mesh) {
-    storm.mesh = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 60, 64, 1, true),
+    storm.mesh = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 140, 72, 1, true),
       new THREE.MeshBasicMaterial({ color: 0x9a3cdc, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false }));
-    storm.mesh.position.y = 20; scene.add(storm.mesh);
+    storm.mesh.position.y = 50; scene.add(storm.mesh);
   }
   storm.mesh.visible = storm.on;
 }
 function nextPhase() {
   const ph = PHASES[++storm.phase]; if (!ph) { storm.waitEnd = storm.shrinkEnd = Infinity; return; }
-  storm.fx = storm.x; storm.fz = storm.z; storm.fr = storm.r; storm.tr = ph[2]; storm.dps = PHASES[Math.max(0, storm.phase - 1)][3];
+  // bigger maps get bigger circles and a little longer to cross them; the first wait starts once the blimp is done
+  const k = LIMIT / 32, tk = 1 + (k - 1) * 0.45;
+  const extra = storm.phase === 0 && FLIGHT.on ? Math.max(0, FLIGHT.t0 + FLIGHT.dur * FLIGHT.inEnd - now) + 12 : 0;
+  storm.fx = storm.x; storm.fz = storm.z; storm.fr = storm.r; storm.tr = ph[2] * k; storm.dps = PHASES[Math.max(0, storm.phase - 1)][3];
   const a = Math.random() * Math.PI * 2, d = Math.random() * Math.max(0, storm.r - storm.tr) * 0.8, lim = Math.max(0, HALF - storm.tr * 0.5);
   storm.tx = clamp(storm.x + Math.cos(a) * d, -lim, lim); storm.tz = clamp(storm.z + Math.sin(a) * d, -lim, lim);
-  storm.waitEnd = now + ph[0]; storm.shrinkEnd = storm.waitEnd + ph[1];
+  storm.waitEnd = now + ph[0] * tk + extra; storm.shrinkEnd = storm.waitEnd + ph[1] * tk;
 }
 function updateStorm(dt) {
   if (!storm.on || !storm.mesh) return;
@@ -1702,7 +1939,7 @@ function updateStorm(dt) {
   }
   storm.mesh.position.x = storm.x; storm.mesh.position.z = storm.z; storm.mesh.scale.set(Math.max(0.1, storm.r), 1, Math.max(0.1, storm.r));
   // the storm hurts me, and the bots I run
-  const out = e => e.alive && Math.hypot(e.pos.x - storm.x, e.pos.z - storm.z) > storm.r;
+  const out = e => e.alive && !e.drop && Math.hypot(e.pos.x - storm.x, e.pos.z - storm.z) > storm.r;
   if (now >= storm.tick) { // in half-second bites, so it hurts (and sounds) like ticks
     storm.tick = now + 0.5;
     if (state === 'playing' && out(player)) damage(player, storm.dps * 0.5, null, 'Storm', false, null);
@@ -1717,7 +1954,8 @@ function stormState() {
 function syncStorm(a) {
   if (!Array.isArray(a) || a.length < 9) return;
   const v = a.map(num);
-  storm.on = true; [storm.x, storm.z, storm.r, storm.tx, storm.tz, storm.tr] = v.slice(0, 6).map(n => clamp(n, -60, 60));
+  const sl = LIMIT * 1.6;
+  storm.on = true; [storm.x, storm.z, storm.r, storm.tx, storm.tz, storm.tr] = v.slice(0, 6).map(n => clamp(n, -sl, sl));
   storm.r = Math.max(0, storm.r); storm.tr = Math.max(0, storm.tr);
   storm.waitEnd = now + v[6]; storm.shrinkEnd = now + v[7]; storm.dps = clamp(v[8], 0, 50);
   if (storm.mesh) storm.mesh.visible = true;
@@ -1731,10 +1969,518 @@ function stormText() {
 function brAlive() {
   return ents.filter(e => !e.zombie && (!e.remote || e.netbot || e.m === net.m) && (e.remote && !e.netbot ? !e.dead : e.alive));
 }
-// battle royale: a kill patches you up and refills your guns
-function killReward(e) {
-  if (!oneLife() || !e || !e.alive || e.remote) return;
-  e.hp = Math.min(100, e.hp + 50); e.ammo = e.guns.map(w => w.mag); e.reloading = false;
+
+// ---------- battle royale: the drop, loot chests, ammo and heals ----------
+// Seeded numbers, so every screen in a room flies the same route and finds the same loot in each chest.
+function hashStr(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function rng(seed) {
+  let a = seed >>> 0;
+  return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+let brSeed = 'x';
+const brKey = () => (mode === 'online' ? `${settings.room}:${net.m}` : brSeed);
+const DOWN = new V3(0, -1, 0), _dp = new V3();
+const floorBelow = (x, y, z) => y - rayWorld(_dp.set(x, y, z), DOWN, 200); // the height of whatever is under (x, y, z)
+
+// The blimp flies a straight line across the map. Everyone rides it, jumps out once it's over land
+// (or gets pushed out before it leaves), falls, opens a glider and steers down to a landing spot.
+const DROP_ST = ['', 'ride', 'fall', 'glide']; // sent over the network by index
+const FLIGHT = { on: false, ax: 0, az: 0, bx: 0, bz: 0, t0: 0, dur: 1, inStart: 0, inEnd: 1, y: 60, mesh: null };
+const flightT = () => (now - FLIGHT.t0) / FLIGHT.dur;
+const flightPos = (t, out = new V3()) => out.set(FLIGHT.ax + (FLIGHT.bx - FLIGHT.ax) * t, FLIGHT.y, FLIGHT.az + (FLIGHT.bz - FLIGHT.az) * t);
+function blimpMesh() {
+  const g = new THREE.Group(), RX = 4.2, RZ = 10;
+  const body = new THREE.Mesh(new THREE.SphereGeometry(1, 22, 16), new THREE.MeshLambertMaterial({ color: 0xc8955a }));
+  body.scale.set(RX, RX, RZ); g.add(body);
+  const spotM = new THREE.MeshLambertMaterial({ color: 0x8a6036 }); // potato eyes, on the skin
+  for (const [x, y, z, s] of [[2.6, 1.8, 3, 0.7], [-3, 1, -2, 0.9], [1.2, 3.2, -5, 0.6], [-2, 2.8, 5, 0.5], [3.4, -0.5, -4, 0.6], [-1.5, -2, -6, 0.5]]) {
+    const f = 0.97 / Math.sqrt((x / RX) ** 2 + (y / RX) ** 2 + (z / RZ) ** 2);
+    const m = new THREE.Mesh(body.geometry, spotM); m.scale.setScalar(s); m.position.set(x * f, y * f, z * f); g.add(m);
+  }
+  const finM = new THREE.MeshLambertMaterial({ color: 0xd9452f });
+  for (const rz of [0, Math.PI / 2]) { const f = new THREE.Mesh(boxGeo, finM); f.scale.set(0.25, 5, 3.2); f.position.z = 9.2; f.rotation.z = rz; g.add(f); }
+  const gond = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x3b3f2e })); gond.scale.set(2.2, 1.3, 5.5); gond.position.y = -4.7; g.add(gond);
+  const win = new THREE.Mesh(boxGeo, new THREE.MeshBasicMaterial({ color: 0xffe9a8 })); win.scale.set(2.25, 0.4, 4.6); win.position.y = -4.6; g.add(win);
+  for (const s of [-1, 1]) { const r = new THREE.Mesh(boxGeo, SM.gear); r.scale.set(0.12, 1.6, 0.12); r.position.set(s * 0.8, -3.6, 0); g.add(r); }
+  g.visible = false; scene.add(g);
+  return g;
+}
+function resetFlight() {
+  FLIGHT.on = oneLife();
+  if (!FLIGHT.mesh) FLIGHT.mesh = blimpMesh();
+  FLIGHT.mesh.visible = FLIGHT.on;
+  if (!FLIGHT.on) return;
+  const r = rng(hashStr(brKey() + ':flight')), a = r() * Math.PI * 2, L = LIMIT * 1.35, off = (r() - 0.5) * HALF * 0.7;
+  const dx = Math.cos(a), dz = Math.sin(a);
+  FLIGHT.ax = -dx * L - dz * off; FLIGHT.az = -dz * L + dx * off; FLIGHT.bx = dx * L - dz * off; FLIGHT.bz = dz * L + dx * off;
+  FLIGHT.y = 40 + LIMIT * 0.3; FLIGHT.dur = 2 * L / 17; FLIGHT.t0 = now + 2;
+  // the stretch of the route over the playable ground: you can only jump there
+  let s = -1, e = -1; const lim = HALF * 0.9, p = new V3();
+  for (let i = 0; i <= 200; i++) { flightPos(i / 200, p); if (Math.abs(p.x) < lim && Math.abs(p.z) < lim) { if (s < 0) s = i / 200; e = i / 200; } }
+  FLIGHT.inStart = s < 0 ? 0.4 : s; FLIGHT.inEnd = s < 0 ? 0.6 : e;
+}
+function updateFlight() {
+  if (!FLIGHT.on) return;
+  const t = flightT();
+  flightPos(t, FLIGHT.mesh.position);
+  FLIGHT.mesh.rotation.set(Math.sin(now * 0.7) * 0.03, Math.atan2(-(FLIGHT.bx - FLIGHT.ax), -(FLIGHT.bz - FLIGHT.az)), Math.sin(now * 0.5) * 0.04);
+  if (t > 1.25) { FLIGHT.on = false; FLIGHT.mesh.visible = false; }
+}
+// a soldier's glider: a canopy over their head while they come down
+const canopyM = new THREE.MeshLambertMaterial({ color: 0xffc83d, side: THREE.DoubleSide });
+const canopyG = new THREE.SphereGeometry(1.5, 14, 6, 0, Math.PI * 2, 0, Math.PI / 2.6);
+function setCanopy(e, on) {
+  if (!e.mesh) return;
+  const u = e.mesh.userData;
+  if (on && !u.canopy) {
+    u.canopy = new THREE.Group();
+    const dome = new THREE.Mesh(canopyG, canopyM); dome.scale.set(1, 0.55, 1.2); dome.position.y = 3.6; u.canopy.add(dome);
+    for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { const l = new THREE.Mesh(boxGeo, SM.gear); l.scale.set(0.03, 2.1, 0.03); l.position.set(x * 0.55, 2.55, z * 0.65); l.rotation.set(z * 0.25, 0, -x * 0.22); u.canopy.add(l); }
+    e.mesh.add(u.canopy);
+  }
+  if (u.canopy) u.canopy.visible = on;
+}
+// in battle royale every soldier starts on the blimp (or, once it has gone, high over a spawn)
+function startDrop(e) {
+  const t = flightT();
+  e.drop = { stage: 'ride', at: now, jumpT: FLIGHT.inStart + (FLIGHT.inEnd - FLIGHT.inStart) * rand(0.05, 0.9), goal: null };
+  e.vel.set(0, 0, 0); e.onGround = false;
+  if (!FLIGHT.on || t > FLIGHT.inEnd) { const s = pick(SPAWNS); e.pos.set(s[0], 40 + LIMIT * 0.3, s[1]); leaveFlight(e); }
+  else flightPos(Math.max(0, t), e.pos).y -= 5;
+  if (e.mesh) { e.mesh.visible = e.drop.stage !== 'ride'; setCanopy(e, false); }
+}
+function leaveFlight(e) {
+  const d = e.drop; d.stage = 'fall'; d.at = now;
+  if (FLIGHT.on && flightT() <= 1) e.vel.set((FLIGHT.bx - FLIGHT.ax) / FLIGHT.dur * 0.25, 0, (FLIGHT.bz - FLIGHT.az) / FLIGHT.dur * 0.25);
+  if (e.mesh) e.mesh.visible = true;
+  if (e.isPlayer) sfx.toss();
+  if (e.ai) { // a bot claims one of the closest chests below it, keeping clear of chests other bots already claimed
+    const near = CH.list.filter(c => !c.open).map(c => [c, Math.hypot(c.x - e.pos.x, c.z - e.pos.z)]).filter(a => a[1] < 70).sort((a, b) => a[1] - b[1]).slice(0, 10).map(a => a[0]);
+    const claimed = CH.list.filter(c => c.claim && c.claim !== e && c.claim.alive);
+    const free = near.filter(c => !claimed.includes(c)), clear = free.filter(c => claimed.every(o => Math.hypot(o.x - c.x, o.z - c.z) > 15));
+    const list = clear.length ? clear : free.length ? free : near;
+    if (list.length) { d.goal = pick(list); d.goal.claim = e; } else { const s = pick(SPAWNS); d.goal = { x: s[0], z: s[1], y: 0 }; }
+  }
+}
+function openGlider(e) {
+  if (!e.drop || e.drop.stage !== 'fall') return;
+  e.drop.stage = 'glide'; setCanopy(e, true);
+  if (e.isPlayer) sfx.glider();
+}
+const LOOT_WINDOW = 25; // seconds after landing that a bot ignores other bots (unless one shoots it); players are fair game
+function land(e) {
+  e.drop = null; setCanopy(e, false); e.landedAt = now; e.hurtBy = null;
+  if (e.mesh) e.mesh.visible = true;
+  if (e.isPlayer) sfx.slide();
+}
+// one step of a drop for anyone I run: wish is the way they steer
+function updateDrop(e, dt, wish) {
+  const d = e.drop;
+  if (d.stage === 'ride') {
+    const t = flightT();
+    flightPos(clamp(t, 0, 1), e.pos).y -= 5; e.vel.set(0, 0, 0);
+    if (!FLIGHT.on || t >= FLIGHT.inEnd || (e.ai && t >= d.jumpT)) leaveFlight(e);
+    return;
+  }
+  if (d.stage === 'fall' && e.pos.y - floorBelow(e.pos.x, e.pos.y, e.pos.z) < 20) openGlider(e);
+  const glide = d.stage === 'glide', spd = glide ? 10 : 7;
+  const n = Math.ceil(dt / 0.02), h = dt / n; // small steps: falling fast must not go through a roof
+  for (let i = 0; i < n; i++) {
+    e.vel.x += (wish.x * spd - e.vel.x) * Math.min(1, h * 2); e.vel.z += (wish.z * spd - e.vel.z) * Math.min(1, h * 2);
+    if (glide) e.vel.y += (-4.5 - e.vel.y) * Math.min(1, h * 3); else e.vel.y = Math.max(-26, e.vel.y - G * h);
+    e.vel.y += grav() * h; // moveEntity takes gravity off again
+    moveEntity(e, h);
+    if (e.onGround) { land(e); return; }
+  }
+}
+function dropPress(p) {
+  const d = p.drop; if (!d) return;
+  if (d.stage === 'ride' && flightT() >= FLIGHT.inStart) leaveFlight(p);
+  else if (d.stage === 'fall' && now - d.at > 0.3) openGlider(p);
+}
+function botDrop(b, dt) {
+  const d = b.drop, wish = new V3();
+  if (d.goal) {
+    wish.set(d.goal.x - b.pos.x, 0, d.goal.z - b.pos.z);
+    const l = wish.length(); if (l > 1) { wish.divideScalar(l); b.yaw += angDiff(b.yaw, Math.atan2(-wish.x, -wish.z)) * Math.min(1, dt * 3); } else wish.set(0, 0, 0);
+  }
+  updateDrop(b, dt, wish);
+  poseSoldier(b, dt);
+  setCanopy(b, !!b.drop && b.drop.stage === 'glide');
+}
+
+// ---------- loot ----------
+// Chests sit where the map puts them (or by the spawns on maps without any). Opening one spills a gun, ammo for it
+// and maybe a heal; online every screen spills the same loot, and picking something up takes it off every screen.
+const CH = { list: [], items: [], byId: new Map(), seq: 0 };
+const LM = {
+  wood: new THREE.MeshLambertMaterial({ color: 0x8a5a2b }), dark: new THREE.MeshLambertMaterial({ color: 0x5a3a1d }),
+  gold: new THREE.MeshLambertMaterial({ color: 0xffc83d }), spent: new THREE.MeshLambertMaterial({ color: 0x77684a }),
+  beam: new THREE.MeshBasicMaterial({ color: 0xffd36b, transparent: true, opacity: 0.22, depthWrite: false }),
+  gun: new THREE.MeshLambertMaterial({ color: 0x2b2e33 }), white: new THREE.MeshLambertMaterial({ color: 0xf2efe6 }), red: new THREE.MeshLambertMaterial({ color: 0xd9452f }),
+};
+const beamG = new THREE.CylinderGeometry(0.07, 0.07, 1, 8);
+const beamMats = new Map();
+const beamMat = c => { if (!beamMats.has(c)) beamMats.set(c, new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.38, depthWrite: false })); return beamMats.get(c); };
+const ammoMats = {}; for (const k in AMMO) ammoMats[k] = new THREE.MeshLambertMaterial({ color: AMMO[k].color });
+const AMMO_KEYS = Object.keys(AMMO), HEAL_KEYS = Object.keys(HEALS);
+function chestMesh(c) {
+  const g = new THREE.Group();
+  piece(g, LM.wood, 1.1, 0.5, 0.7, 0, 0.25, 0);
+  const trims = [piece(g, LM.gold, 1.14, 0.07, 0.74, 0, 0.47, 0), piece(g, LM.gold, 0.1, 0.5, 0.74, -0.38, 0.25, 0), piece(g, LM.gold, 0.1, 0.5, 0.74, 0.38, 0.25, 0)];
+  const lid = new THREE.Group(); lid.position.set(0, 0.5, 0.35); g.add(lid);
+  piece(lid, LM.dark, 1.1, 0.22, 0.7, 0, 0.11, -0.35);
+  trims.push(piece(lid, LM.gold, 0.14, 0.16, 0.06, 0, 0.02, -0.72));
+  const beam = new THREE.Mesh(beamG, LM.beam); beam.scale.set(1, 7, 1); beam.position.y = 4; g.add(beam);
+  g.position.set(c.x, c.y, c.z); g.rotation.y = c.rot; scene.add(g);
+  Object.assign(c, { mesh: g, lid, trims, beam });
+}
+function fallbackChests() {
+  return SPAWNS.map(s => [s[0], s[1], 0]).filter(([x, z, y]) => !boxes.some(b => x + 0.6 > b.min.x && x - 0.6 < b.max.x && z + 0.6 > b.min.z && z - 0.6 < b.max.z && y + 0.5 > b.min.y && y < b.max.y - 0.05));
+}
+function resetLoot() {
+  for (const c of CH.list) scene.remove(c.mesh);
+  for (const it of CH.items) scene.remove(it.mesh);
+  CH.list = []; CH.items = []; CH.byId.clear();
+  if (!oneLife()) return;
+  const r = rng(hashStr(currentMap + ':chests'));
+  (CHESTS.length ? CHESTS.map(([x, z, y]) => [x, z, y || 0]) : fallbackChests()).forEach(([x, z, y], i) => {
+    const c = { i, x, y, z, rot: r() * Math.PI * 2, open: false, claim: null }; chestMesh(c); CH.list.push(c);
+  });
+}
+// what chest i holds this match: a gun by weight, a pack of its ammo, maybe more ammo, maybe a heal
+const rarCss = r => '#' + RARITY[r | 0].color.toString(16).padStart(6, '0');
+function rollRarity(r) {
+  let x = r() * RARITY.reduce((a, t) => a + t.w, 0);
+  for (let i = 0; i < RARITY.length; i++) if ((x -= RARITY[i].w) < 0) return i;
+  return 0;
+}
+function chestLoot(i) {
+  const r = rng(hashStr(brKey() + ':c' + i)), out = [];
+  let x = r() * CHEST_GUNS.reduce((a, g) => a + g[1], 0), gid = CHEST_GUNS[0][0];
+  for (const [id, w] of CHEST_GUNS) if ((x -= w) < 0) { gid = id; break; }
+  out.push({ kind: 'gun', w: gid, qty: WEAPONS[gid].mag, r: rollRarity(r) });
+  out.push({ kind: 'ammo', type: AMMO_OF[gid], qty: AMMO[AMMO_OF[gid]].pack });
+  if (r() < 0.5) { const t = ['light', 'shells', 'heavy', 'light'][(r() * 4) | 0]; out.push({ kind: 'ammo', type: t, qty: AMMO[t].pack }); }
+  const h = r();
+  if (h < 0.55) out.push({ kind: 'heal', type: 'bandage', qty: r() < 0.4 ? 2 : 1 });
+  else if (h < 0.77) out.push({ kind: 'heal', type: 'medkit', qty: 1 });
+  return out;
+}
+function itemMesh(it) {
+  const g = new THREE.Group(), spin = new THREE.Group(); g.add(spin);
+  if (it.kind === 'gun') {
+    const L = [0.5, 0.8, 1.0, 0.8, 1.0, 0.35][it.w];
+    if (it.w === 4) { const t = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, L, 10), LM.gun); t.rotation.x = Math.PI / 2; spin.add(t); piece(spin, LM.red, 0.1, 0.1, 0.18, 0, 0, -L / 2 - 0.08); }
+    else if (it.w === KNIFE) { piece(spin, LM.gun, 0.04, 0.05, 0.14, 0, 0, 0.1); piece(spin, LM.white, 0.015, 0.05, 0.24, 0, 0, -0.08); }
+    else {
+      piece(spin, LM.gun, 0.08, 0.12, L * 0.6, 0, 0, 0); piece(spin, LM.gun, 0.04, 0.04, L * 0.4, 0, 0.02, -L * 0.5);
+      piece(spin, LM.gun, 0.06, 0.16, 0.08, 0, -0.12, -0.05); piece(spin, it.w === 1 || it.w === 2 ? LM.wood : LM.gun, 0.06, 0.1, L * 0.3, 0, -0.03, L * 0.42);
+      if (it.w === 2) piece(spin, LM.gun, 0.06, 0.06, 0.3, 0, 0.1, 0);
+    }
+    spin.scale.setScalar(1.3);
+    const rr = it.r | 0, beam = new THREE.Mesh(beamG, beamMat(RARITY[rr].color)); beam.scale.set(1 + rr * 0.35, 3 + rr, 1 + rr * 0.35); beam.position.y = 1.4 + rr / 2; g.add(beam);
+  } else if (it.kind === 'ammo') {
+    piece(spin, ammoMats[it.type], 0.34, 0.22, 0.24, 0, 0, 0); piece(spin, LM.dark, 0.36, 0.05, 0.26, 0, 0.1, 0);
+  } else if (it.type === 'medkit') {
+    piece(spin, LM.white, 0.5, 0.3, 0.36, 0, 0, 0); piece(spin, LM.red, 0.28, 0.02, 0.08, 0, 0.16, 0); piece(spin, LM.red, 0.08, 0.02, 0.28, 0, 0.16, 0);
+  } else {
+    piece(spin, LM.white, 0.3, 0.12, 0.3, 0, 0, 0); piece(spin, LM.red, 0.16, 0.02, 0.05, 0, 0.07, 0); piece(spin, LM.red, 0.05, 0.02, 0.16, 0, 0.07, 0);
+  }
+  scene.add(g);
+  return { mesh: g, spin };
+}
+// where the k-th of n things dropped at (x, y, z) lands: in a ring round it, kept off walls
+const _sd = new V3(), _so = new V3();
+function spillSpot(x, y, z, k, n, a0 = 0, r0 = 1) {
+  const a = a0 + (n > 1 ? (k / n) * Math.PI * 2 : 0), dx = -Math.sin(a), dz = -Math.cos(a);
+  const d = Math.max(0.2, Math.min(r0, rayWorld(_so.set(x, y + 0.4, z), _sd.set(dx, 0, dz), r0 + 0.5) - 0.45));
+  const px = x + dx * d, pz = z + dz * d;
+  return [px, floorBelow(px, y + 0.6, pz), pz];
+}
+function addItem(id, spec, x, y, z, fx = x, fz = z) {
+  if (CH.byId.has(id)) return;
+  const it = { id, ...spec, x, y, z, fx, fz, born: now, ph: Math.random() * 6, ...itemMesh(spec) };
+  CH.items.push(it); CH.byId.set(id, it);
+  if (CH.items.length > 140) takeItem(CH.items[0], true);
+}
+function takeItem(it, quiet) {
+  scene.remove(it.mesh); CH.byId.delete(it.id);
+  const i = CH.items.indexOf(it); if (i >= 0) CH.items.splice(i, 1);
+  if (!quiet && mode === 'online') netEvent('pk', it.id);
+}
+function openChest(i, by, fromNet) {
+  const c = CH.list[i]; if (!c || c.open) return;
+  c.open = true; c.beam.visible = false; c.trims.forEach(m => { m.material = LM.spent; });
+  if (state === 'playing') sfx.chest(by === player ? 1 : distVol(c.mesh.position));
+  const loot = chestLoot(i);
+  loot.forEach((it, k) => { const [x, y, z] = spillSpot(c.x, c.y, c.z, 0, 1, c.rot + (k - (loot.length - 1) / 2) * 0.75, 1.3); addItem('c' + i + ':' + k, it, x, y, z, c.x, c.z); });
+  if (!fromNet && mode === 'online') netEvent('c', i);
+}
+// someone I run went down (or swapped a gun): their things fall where they stand, on every screen
+const encItems = list => list.flatMap(it => [it.kind === 'gun' ? 0 : it.kind === 'ammo' ? 1 : 2, it.kind === 'gun' ? it.w + 10 * (it.r | 0) : it.kind === 'ammo' ? AMMO_KEYS.indexOf(it.type) : HEAL_KEYS.indexOf(it.type), it.qty]);
+function decItems(flat) {
+  const out = [];
+  for (let i = 0; i + 2 < flat.length && out.length < 12; i += 3) {
+    const k = flat[i] | 0, t = flat[i + 1] | 0, q = clamp(flat[i + 2] | 0, 1, 999);
+    if (k === 0 && WEAPONS[t % 10]) out.push({ kind: 'gun', w: t % 10, qty: q, r: clamp((t / 10) | 0, 0, RARITY.length - 1) }); // gun id + 10 x rarity
+    else if (k === 1 && AMMO_KEYS[t]) out.push({ kind: 'ammo', type: AMMO_KEYS[t], qty: q });
+    else if (k === 2 && HEAL_KEYS[t]) out.push({ kind: 'heal', type: HEAL_KEYS[t], qty: q });
+  }
+  return out;
+}
+function spillItems(key, list, x, y, z) {
+  list.forEach((it, k) => { const [px, py, pz] = spillSpot(x, y, z, k, list.length, 0.4, list.length > 1 ? 1 : 0.6); addItem(key + ':' + k, it, px, py, pz, x, z); });
+}
+function dropItems(e, list) {
+  if (!list.length) return;
+  const x = r2(e.pos.x), y = r2(e.pos.y), z = r2(e.pos.z);
+  if (mode === 'online') { spillItems(net.myPeer + ':' + (net.seq + 1), list, x, y, z); netEvent('dp', x, y, z, ...encItems(list)); }
+  else spillItems('l' + ++CH.seq, list, x, y, z);
+}
+function dropAll(e) {
+  const list = [];
+  e.guns.forEach((g, i) => { if (g.kind !== 'melee') list.push({ kind: 'gun', w: g.id, qty: Math.max(1, e.ammo[i]), r: g.rar | 0 }); });
+  if (e.isPlayer) { for (const k of AMMO_KEYS) if (e.res[k] > 0) list.push({ kind: 'ammo', type: k, qty: e.res[k] }); }
+  else for (const g of e.guns) if (AMMO_OF[g.id]) list.push({ kind: 'ammo', type: AMMO_OF[g.id], qty: AMMO[AMMO_OF[g.id]].pack });
+  for (const k of HEAL_KEYS) if (e.heals[k] > 0) list.push({ kind: 'heal', type: k, qty: e.heals[k] });
+  dropItems(e, list.slice(0, 12));
+}
+function giveGun(e, w, ammo, slot = e.guns.length, rar = 0) {
+  const g = { ...(e.isPlayer ? P.armedWeapon(prog, w) : WEAPONS[w]) }, R = RARITY[rar | 0];
+  if (g.kind !== 'melee') { g.rar = rar | 0; g.dmg *= R.dmg; g.reload *= R.reload; }
+  e.guns[slot] = g; e.ammo[slot] = Math.min(g.mag, ammo);
+  if (e.isPlayer) dressVM();
+  if (slot === e.weapon) { e.reloading = false; if (e.isPlayer) { vm.switchT = 0.3; refreshVM(); } }
+  else if (e.guns[e.weapon].kind === 'melee') switchWeapon(e, slot);
+}
+const lootName = it => (it.kind === 'gun' ? `${RARITY[it.r | 0].name} ${WEAPONS[it.w].name}` : it.kind === 'ammo' ? `${it.qty} ${AMMO[it.type].name}` : `${it.qty} ${HEALS[it.type].name}${it.qty > 1 ? 's' : ''}`);
+// walking over something takes it if there's room: guns into a free slot, ammo and heals up to what you can carry
+function autoPickup(e) {
+  for (let i = CH.items.length - 1; i >= 0; i--) {
+    const it = CH.items[i];
+    if (now - it.born < 0.45 || Math.abs(it.y - e.pos.y) > 1.6 || Math.hypot(it.x - e.pos.x, it.z - e.pos.z) > (e.isPlayer ? 1.3 : 2)) continue;
+    let took = null;
+    if (e.isPlayer && it.kind === 'gun') continue; // you pick guns up yourself (E)
+    if (it.kind === 'gun') {
+      if (e.guns.length < MAX_SLOTS && !e.guns.some(g => g.id === it.w)) { giveGun(e, it.w, it.qty, undefined, it.r); took = it.qty; }
+    } else if (it.kind === 'ammo') {
+      if (!e.isPlayer) continue; // bots never run dry, so they leave ammo for the players
+      const n = Math.min(AMMO[it.type].max - (e.res[it.type] || 0), it.qty);
+      if (n > 0) { e.res[it.type] = (e.res[it.type] || 0) + n; it.qty -= n; took = n; }
+    } else {
+      const n = Math.min(HEALS[it.type].max - (e.heals[it.type] || 0), it.qty);
+      if (n > 0) { e.heals[it.type] = (e.heals[it.type] || 0) + n; it.qty -= n; took = n; }
+    }
+    if (took === null) continue;
+    if (e.isPlayer) { sfx.pick(); toast('+ <em></em>', lootName({ ...it, qty: took }), false); }
+    if (it.kind === 'gun' || it.qty <= 0) takeItem(it);
+  }
+}
+const nearTo = (e, x, y, z, reach) => Math.abs(y - e.pos.y) < 1.6 && Math.hypot(x - e.pos.x, z - e.pos.z) < reach;
+function nearChest(e, reach = 2.2) {
+  let best = null, bd = Infinity;
+  for (const c of CH.list) if (!c.open && nearTo(e, c.x, c.y, c.z, reach)) { const d = Math.hypot(c.x - e.pos.x, c.z - e.pos.z); if (d < bd) { bd = d; best = c; } }
+  return best;
+}
+function nearGun(e) {
+  let best = null, bd = Infinity;
+  for (const it of CH.items) if (it.kind === 'gun' && !e.guns.some(g => g.id === it.w && (g.rar | 0) >= (it.r | 0)) && nearTo(e, it.x, it.y, it.z, 1.9)) { const d = Math.hypot(it.x - e.pos.x, it.z - e.pos.z); if (d < bd) { bd = d; best = it; } }
+  return best;
+}
+// with every slot full you swap the gun in your hands, so holding the knife picks nothing up
+const knifeFull = p => p.guns.length >= MAX_SLOTS && p.guns[p.weapon].kind === 'melee';
+// E: open the chest in front of you, or trade the gun in your hands for the one at your feet
+function useKey(p) {
+  if (!oneLife()) return;
+  const c = nearChest(p); if (c) return openChest(c.i, p);
+  const it = nearGun(p); if (!it) return;
+  if (knifeFull(p)) { toast('Slots full: hold the gun you want to swap'); return; }
+  const same = p.guns.findIndex(g => g.id === it.w); // a better copy of a gun you have replaces it
+  if (same < 0 && p.guns.length < MAX_SLOTS) { giveGun(p, it.w, it.qty, undefined, it.r); takeItem(it); sfx.pick(); return; }
+  const slot = same >= 0 ? same : p.weapon, old = p.guns[slot];
+  dropItems(p, [{ kind: 'gun', w: old.id, qty: Math.max(1, p.ammo[slot]), r: old.rar | 0 }]);
+  takeItem(it); giveGun(p, it.w, it.qty, slot, it.r); switchWeapon(p, slot); sfx.pick();
+  toast('Swapped for <em></em>', lootName(it), false);
+}
+// bots: open a chest when they reach it, and go for one (or a gun on the floor) while they're short of guns
+function findLoot(b) {
+  let best = null, bs = Infinity;
+  const inStorm = (x, z) => !storm.on || Math.hypot(x - storm.x, z - storm.z) < storm.r - 3;
+  const consider = (o, x, y, z) => { const d = Math.hypot(x - b.pos.x, z - b.pos.z) + 12 * Math.abs(y - b.pos.y); if (d < 60 && d < bs && inStorm(x, z)) { bs = d; best = o; } };
+  for (const c of CH.list) if (!c.open && !(c.claim && c.claim !== b && c.claim.alive)) consider(c, c.x, c.y, c.z); // leave other bots' claims alone
+  for (const it of CH.items) if (it.kind === 'gun' && !b.guns.some(g => g.id === it.w)) consider(it, it.x, it.y, it.z);
+  return best;
+}
+function botLoot(b, ai) {
+  const c = nearChest(b, 1.8); if (c) openChest(c.i, b);
+  const valid = ai.loot && (ai.loot.spin ? CH.byId.get(ai.loot.id) === ai.loot : !ai.loot.open);
+  if (!valid) ai.loot = null;
+  if (b.guns.length >= 3) { ai.loot = null; return; }
+  if (!ai.loot || now > ai.lootUntil) {
+    ai.loot = findLoot(b); ai.lootUntil = now + 15;
+    if (ai.loot) { ai.goal = new V3(ai.loot.x, ai.loot.y, ai.loot.z); ai.goalExpire = now + 15; }
+  }
+  if (ai.loot && ai.goal) ai.goal.set(ai.loot.x, ai.loot.y, ai.loot.z); // don't wander off once close
+}
+
+// ---------- heals ----------
+// Using one takes a few seconds standing still: moving, jumping, shooting or switching weapons stops it.
+const _hb = new V3(), _hf = new V3();
+function pickHeal(e) {
+  const b = e.heals.bandage > 0 && e.hp < HEALS.bandage.cap, m = e.heals.medkit > 0 && e.hp < 100;
+  return m && (e.hp <= 50 || !b) ? 'medkit' : b ? 'bandage' : null;
+}
+const movingKeys = () => ['fwd', 'back', 'left', 'right', 'jump'].some(bound);
+function startHeal(e, want) {
+  if (!oneLife() || e.useT || !e.alive || e.drop) return;
+  if (e.isPlayer && (movingKeys() || !e.onGround || Math.hypot(e.vel.x, e.vel.z) > 1.5)) { toast('Stand still to heal'); return; }
+  if (want) { // the player asked for this one
+    const H = HEALS[want];
+    if (!(e.heals[want] > 0)) { if (e.isPlayer) toast(`No ${H.name.toLowerCase()}s`); return; }
+    if (e.hp >= (H.cap || 100)) { if (e.isPlayer) { if (H.cap) toast('Bandages only heal to <em></em>', String(H.cap), false); else toast('Already at full health'); } return; }
+  }
+  const type = want || pickHeal(e);
+  if (!type) {
+    if (e.isPlayer) {
+      if (e.heals.bandage + e.heals.medkit === 0) toast('No heals'); else if (e.hp >= 100) toast('Already at full health');
+      else toast('Bandages only heal to <em></em>', String(HEALS.bandage.cap), false);
+    }
+    return;
+  }
+  e.useT = { type, start: now, end: now + HEALS[type].time, puff: now }; e.reloading = false; e.sprint = false;
+}
+function updateHeal(e) {
+  const u = e.useT; if (!u) return;
+  if (!e.alive) { e.useT = null; return; }
+  if (e.isPlayer && (movingKeys() || !e.onGround)) { e.useT = null; toast('Heal cancelled: you moved'); return; }
+  if (now > u.puff + 0.35) { // little green crosses rising off whoever is healing
+    u.puff = now; bodyC(e, _hb); _hb.y += 0.3;
+    if (e.isPlayer) _hb.addScaledVector(fwdVec(e.yaw, 0, _hf), 0.7).y -= 0.5;
+    burst(_hb, [0x6fe36f, 0xb8f7a8, 0xffffff], 3, 1.2, 0.07, 0.7);
+  }
+  if (now < u.end) return;
+  const h = HEALS[u.type];
+  e.heals[u.type]--; e.hp = Math.max(e.hp, Math.min(h.cap || 100, e.hp + h.hp)); e.useT = null;
+  if (e.isPlayer) { sfx.heal(); toast('Used <em></em>', h.name, false); }
+}
+// reloading in battle royale draws on the ammo you carry; everywhere else (and for bots) mags are free
+const carries = e => oneLife() && e.isPlayer;
+function finishReload(e) {
+  const i = e.reloadWeapon, w = e.guns[i]; e.reloading = false; if (!w) return;
+  let need = w.mag - e.ammo[i];
+  const at = AMMO_OF[w.id];
+  if (carries(e) && at) { need = Math.max(0, Math.min(need, e.res[at] || 0)); e.res[at] -= need; }
+  e.ammo[i] += need;
+}
+
+// ---------- minimap (battle royale) ----------
+const MM = { base: null, map: null, at: 0, S: 360, big: false };
+function toggleBigMap(on = !MM.big) {
+  on = on && oneLife() && state === 'playing';
+  if (on === MM.big) return;
+  MM.big = on; MM.S = on ? 900 : 360; MM.base = null; MM.at = 0;
+  const el = $('minimap'); el.width = el.height = MM.S; el.classList.toggle('big', on);
+}
+function mmBase() {
+  const S = MM.S, c = document.createElement('canvas'); c.width = c.height = S;
+  const g = c.getContext('2d'), k = S / (2 * LIMIT);
+  g.fillStyle = '#5f7448'; g.fillRect(0, 0, S, S);
+  const list = boxes.filter(b => b.max.y > 0.3 && (b.max.x - b.min.x) * (b.max.z - b.min.z) < LIMIT * LIMIT).sort((a, b) => a.max.y - b.max.y);
+  for (const b of list) {
+    const t = clamp(b.max.y / 9, 0, 1);
+    g.fillStyle = `rgb(${Math.round(110 + 110 * t)},${Math.round(104 + 100 * t)},${Math.round(88 + 90 * t)})`;
+    g.fillRect((b.min.x + LIMIT) * k, (b.min.z + LIMIT) * k, Math.max(1, (b.max.x - b.min.x) * k), Math.max(1, (b.max.z - b.min.z) * k));
+  }
+  MM.base = c; MM.map = currentMap;
+}
+function drawMinimap() {
+  const el = $('minimap'); el.hidden = !oneLife() || state === 'menu';
+  if (MM.big && (el.hidden || state !== 'playing')) toggleBigMap(false);
+  if (el.hidden || now < MM.at) return;
+  MM.at = now + 0.1;
+  if (MM.map !== currentMap || !MM.base) mmBase();
+  const S = MM.S, g = el.getContext('2d'), k = S / (2 * LIMIT), X = x => (x + LIMIT) * k, u = MM.big ? 1.4 : 1; // u: marker size on the big map
+  g.clearRect(0, 0, S, S); g.drawImage(MM.base, 0, 0);
+  if (FLIGHT.on) {
+    g.setLineDash([10 * u, 8 * u]); g.strokeStyle = 'rgba(255,240,200,.8)'; g.lineWidth = 3 * u;
+    g.beginPath(); g.moveTo(X(FLIGHT.ax), X(FLIGHT.az)); g.lineTo(X(FLIGHT.bx), X(FLIGHT.bz)); g.stroke(); g.setLineDash([]);
+    const t = clamp(flightT(), 0, 1); g.fillStyle = '#c8955a';
+    g.beginPath(); g.arc(X(FLIGHT.ax + (FLIGHT.bx - FLIGHT.ax) * t), X(FLIGHT.az + (FLIGHT.bz - FLIGHT.az) * t), 7 * u, 0, Math.PI * 2); g.fill();
+  }
+  g.fillStyle = '#ffc83d';
+  for (const c of CH.list) if (!c.open && Math.hypot(c.x - player.pos.x, c.z - player.pos.z) < 45) g.fillRect(X(c.x) - 3 * u, X(c.z) - 3 * u, 6 * u, 6 * u);
+  if (storm.on) {
+    g.fillStyle = 'rgba(150,60,220,.45)'; g.beginPath(); g.rect(0, 0, S, S); g.arc(X(storm.x), X(storm.z), Math.max(0, storm.r * k), 0, Math.PI * 2, true); g.fill('evenodd');
+    g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 2 * u; g.beginPath(); g.arc(X(storm.tx), X(storm.tz), Math.max(0, storm.tr * k), 0, Math.PI * 2); g.stroke();
+  }
+  if (player.alive) {
+    const px = X(player.pos.x), pz = X(player.pos.z), fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
+    const a = 11 * u, b = 6 * u, w = 7 * u;
+    g.fillStyle = '#fff6e0'; g.strokeStyle = '#1b1208'; g.lineWidth = 2 * u; g.beginPath();
+    g.moveTo(px + fx * a, pz + fz * a); g.lineTo(px - fx * b - fz * w, pz - fz * b + fx * w); g.lineTo(px - fx * b + fz * w, pz - fz * b - fx * w); g.closePath(); g.stroke(); g.fill();
+  }
+}
+// the prompt under the crosshair, the heals you carry, the heal bar and the minimap
+const _lv = new V3(), _lf = new V3();
+function lookedAtGun() {
+  camera.getWorldDirection(_lf);
+  let best = null, bs = Infinity;
+  for (const it of CH.items) {
+    if (it.kind !== 'gun') continue;
+    _lv.set(it.x, it.y + 0.45, it.z).sub(camera.position);
+    const d = _lv.length(); if (d > 15 || d < 0.3) continue;
+    const off = _lv.divideScalar(d).angleTo(_lf); // how far off the crosshair, allowing for the gun's size up close
+    if (off < Math.max(0.05, 0.55 / d) && off * d < bs) { bs = off * d; best = it; }
+  }
+  if (best) { _lv.set(best.x, best.y + 0.45, best.z).sub(camera.position); const d = _lv.length(); if (rayWorld(camera.position, _lv.divideScalar(d), d) < d - 0.4) return null; } // behind a wall
+  return best;
+}
+function updateBRHud() {
+  const p = player, br = oneLife() && p.alive; let s = '';
+  if (br && p.drop) {
+    const d = p.drop, t = flightT(), kj = keyName(binds.jump);
+    if (d.stage === 'ride') s = t < FLIGHT.inStart ? 'Heading for the island…' : `${kj} · Jump (pushed out in ${Math.max(0, Math.ceil((FLIGHT.inEnd - t) * FLIGHT.dur))}s)`;
+    else if (d.stage === 'fall') s = `${kj} · Open glider`;
+  } else if (br) {
+    const ku = keyName(binds.use), c = nearChest(p);
+    if (c) s = `${ku} · Open chest`;
+    else {
+      const it = nearGun(p);
+      if (it) s = knifeFull(p) ? `Slots full · hold a gun to swap for ${lootName(it)}` : `${ku} · ${p.guns.length < MAX_SLOTS && !p.guns.some(g => g.id === it.w) ? 'Pick up' : 'Swap for'} ${lootName(it)}`;
+    }
+  }
+  setText('prompt', s); $('prompt').hidden = !s;
+  // the gun under your crosshair, up to 15 m away: its rarity, name and what it does
+  const lk = br && !p.drop ? lookedAtGun() : null, tag = $('lookTag');
+  tag.hidden = !lk;
+  if (lk) {
+    const W = WEAPONS[lk.w], R = RARITY[lk.r | 0];
+    tag.style.setProperty('--rar', rarCss(lk.r));
+    setText('lookName', `${R.name} ${W.name}`);
+    setText('lookStats', `${Math.round(W.dmg * R.dmg)} dmg${W.pellets > 1 ? ' × ' + W.pellets : ''} · ${W.mag} mag · ${(W.reload * R.reload).toFixed(1)}s reload`);
+  }
+  $('heals').hidden = !oneLife();
+  if (oneLife()) setText('heals', `${keyName(binds.bandage)} · ${p.heals.bandage | 0} bandage${p.heals.bandage === 1 ? '' : 's'} · ${keyName(binds.medkit)} · ${p.heals.medkit | 0} medkit${p.heals.medkit === 1 ? '' : 's'}`);
+  const u = p.useT; $('useBar').hidden = !u;
+  if (u) { setText('useName', `${HEALS[u.type].name}…`); $('useFill').style.width = (100 * clamp((now - u.start) / (u.end - u.start), 0, 1)).toFixed(1) + '%'; }
+  drawMinimap();
+}
+function updateLoot(dt) {
+  if (!CH.list.length && !CH.items.length) return;
+  const gl = 0.3 + 0.22 * Math.sin(now * 4); LM.gold.emissive.setRGB(gl, gl * 0.7, 0);
+  for (const c of CH.list) if (c.open && c.lid.rotation.x < 1.85) c.lid.rotation.x += (1.9 - c.lid.rotation.x) * Math.min(1, dt * 10);
+  for (const it of CH.items) {
+    const k = clamp((now - it.born) / 0.4, 0, 1);
+    it.mesh.position.set(it.fx + (it.x - it.fx) * k, it.y + 0.35 + Math.sin(k * Math.PI) * 0.8 + Math.sin(now * 2.2 + it.ph) * 0.06, it.fz + (it.z - it.fz) * k);
+    it.spin.rotation.y += dt * 1.4;
+  }
+  for (const e of [...ents]) if (e.alive && !e.drop && !e.remote && !e.zombie && (e.isPlayer ? state === 'playing' : e.ai)) autoPickup(e);
+}
+function resetBR() {
+  brSeed = Math.random().toString(36).slice(2);
+  resetFlight(); resetLoot(); resetStorm(); hideSelf();
+  MM.at = 0;
 }
 
 // ---------- zombies: co-op waves ----------
@@ -1780,7 +2526,7 @@ function zombieDied(z, src, wname, head) {
 function onWave(w) {
   if (state !== 'playing' && state !== 'paused') return;
   toast('Wave <em></em>', String(w), false); sfx.kill();
-  if (!player.alive) { respawn(player); $('death').hidden = true; refreshVM(); }
+  if (!player.alive) { respawn(player); $('death').hidden = true; refreshVM(); relockAfterDeath(); }
 }
 // a free spot at least 12 m from every living player
 function zombieSpawnPoint() {
@@ -1859,7 +2605,7 @@ function syncZombies(zs) {
     if (!Array.isArray(a)) continue;
     const id = a[0] | 0; if (id <= 0) continue;
     seen.add(id);
-    const x = clamp(num(a[1]), -32, 32), y = clamp(num(a[2]), 0, 20), zz = clamp(num(a[3]), -32, 32);
+    const x = clamp(num(a[1]), -LIMIT, LIMIT), y = clamp(num(a[2]), 0, 40), zz = clamp(num(a[3]), -LIMIT, LIMIT);
     const z = Z.byId.get(id) || addZombie(id, x, zz, true);
     z.target.set(x, y, zz); z.tyaw = num(a[4]); z.hp = num(a[5]);
     Z.nextId = Math.max(Z.nextId, id + 1);
@@ -1960,7 +2706,7 @@ function startGame(fromLink = false) {
   for (const pl of piles) scene.remove(pl.g); piles.length = 0;
   $('feed').innerHTML = '';
   setMap(settings.map); // online, the room's map replaces this once connected
-  teams.bank = [0, 0]; net.tscore = null; resetStorm();
+  teams.bank = [0, 0]; net.tscore = null; resetBR();
   player.team = game === 'tdm' ? 0 : undefined; // online, the server seats you once connected
   if (mode === 'online' || !versus()) setupBots(0, settings.diff);
   else if (teamsOn()) { const ts = clamp(settings.ts | 0, 1, 6); setupBots(ts * 2 - 1, settings.diff, [...Array(ts - 1).fill(0), ...Array(ts).fill(1)]); } // you plus ts - 1 bots, against ts bots
@@ -1992,7 +2738,7 @@ function playAgain() {
   const hi = Math.max(net.m, ...[...net.remotes.values()].map(r => r.m));
   net.m = hi > net.m ? hi : net.m + 1; // everyone who presses Play again lands on the same match number
   player.kills = player.deaths = 0; player.nadeReady = 0; resetRun(); resetZombies(); flashT = 0;
-  teams.bank = [0, 0]; net.tscore = null; resetStorm();
+  teams.bank = [0, 0]; net.tscore = null; resetBR();
   for (const e of ents) if (e.ai) { e.kills = e.deaths = 0; respawn(e); }
   respawn(player); refreshVM();
   leaderCache = null; updateScoreTop(); $('death').hidden = true;
@@ -2021,7 +2767,7 @@ function toMenu() {
   leaveRoom(); mode = 'bots'; game = 'ffa'; stopAim(); flashT = 0; updateNetStatus();
   setState('menu');
   player.alive = false; player.respawnAt = Infinity;
-  setMap(settings.map); setupBots(5, 'normal'); resetStorm();
+  setMap(settings.map); resetBR(); setupBots(5, 'normal');
   updateModeUI(); // back on the server browser, its list starts refreshing again
 }
 
@@ -2087,6 +2833,8 @@ $('nameIn').value = settings.name;
 $('nameIn').addEventListener('keydown', e => { if (e.key === 'Enter' && !$('playBtn').hidden) $('playBtn').click(); });
 $('playBtn').addEventListener('click', () => (settings.mode === 'online' ? createRoom() : startGame()));
 $('againBtn').addEventListener('click', playAgain);
+$('deathAgain').addEventListener('click', playAgain);
+$('deathMenu').addEventListener('click', toMenu);
 $('menuBtn').addEventListener('click', toMenu);
 $('quitBtn').addEventListener('click', toMenu);
 $('ctrlBtn').addEventListener('click', () => openControls('menu'));
@@ -2149,10 +2897,11 @@ function frame(t) {
     if (state === 'playing') updatePlayer(dt); else if (state === 'menu') menuCamera(dt);
     for (const e of ents) {
       if (!e.isPlayer && !e.remote && !e.zombie) updateBot(e, dt);
-      if (e.reloading && now >= e.reloadEnd) { e.ammo[e.reloadWeapon] = e.guns[e.reloadWeapon].mag; e.reloading = false; }
+      if (e.reloading && now >= e.reloadEnd) finishReload(e);
+      if (e.useT && !e.remote) updateHeal(e);
     }
     if (mode === 'online') { updateRemotes(dt); updateRoster(); }
-    updateZombies(dt); updateAim(); updateStorm(dt);
+    updateZombies(dt); updateAim(); updateStorm(dt); updateFlight(); updateLoot(dt);
     updateNades(dt); updateParts(dt);
     for (const tr of tracers) if (tr.visible) { tr.userData.life -= dt; tr.material.opacity = tr.userData.life / 0.08; if (tr.userData.life <= 0) tr.visible = false; }
     for (const b of blasts) if (b.m.visible) { b.t += dt / 0.35; b.m.scale.setScalar(0.5 + b.t * 5.5); b.m.material.opacity = Math.max(0, 0.85 * (1 - b.t)); if (b.t >= 1) b.m.visible = false; }
@@ -2165,8 +2914,11 @@ function frame(t) {
   if (Math.abs(camera.fov - targetFov) > 0.1) { camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 14); camera.updateProjectionMatrix(); }
 
   // view model
-  const showVM = state !== 'menu' && player.alive && !(zoomed && camera.fov < 40);
-  if (showVM) {
+  const healing = state !== 'menu' && player.alive && !player.drop && !!player.useT;
+  const showVM = state !== 'menu' && player.alive && !player.drop && (healing || !(zoomed && camera.fov < 40));
+  vm.root.visible = !healing; healVM.root.visible = healing;
+  if (healing) poseHealVM(player.useT);
+  if (showVM && !healing) {
     vm.kick = Math.max(0, vm.kick - dt * 7); vm.switchT = Math.max(0, vm.switchT - dt);
     vm.swayX *= Math.pow(0.002, dt); vm.swayY *= Math.pow(0.002, dt);
     const sp = Math.hypot(player.vel.x, player.vel.z) / 7.4;
@@ -2175,22 +2927,30 @@ function frame(t) {
     VM_ADS.y = -curVM().userData.sightY * 0.72; // puts the sight on the screen center
     const swing = curW().kind === 'melee' ? vm.kick : 0; // knife slash
     const hip = 1 - vm.ads, base = _f.copy(VM_BASE).lerp(VM_ADS, vm.ads);
+    const rk = player.reloading ? clamp((now - player.reloadStart) / Math.max(0.01, player.reloadEnd - player.reloadStart), 0, 1) : 0;
+    const rl = rk > 0 ? Math.sin(Math.PI * Math.min(1, rk * 1.15)) : 0; // down, hold, back up
+    const tap = rk > 0.45 && rk < 0.62 ? Math.sin((rk - 0.45) / 0.17 * Math.PI) : 0; // the mag slapping home
     vm.root.position.set(base.x + (vm.swayX + Math.sin(vm.bob) * 0.012 * sp) * hip - vm.spr * 0.06,
-      base.y + (vm.swayY - Math.abs(Math.cos(vm.bob)) * 0.012 * sp) * hip - vm.switchT * 0.8 - vm.spr * 0.05,
+      base.y + (vm.swayY - Math.abs(Math.cos(vm.bob)) * 0.012 * sp) * hip - vm.switchT * 0.8 - vm.spr * 0.05 - rl * 0.13 + tap * 0.03,
       base.z + vm.kick * 0.07 * (1 - 0.6 * vm.ads) - swing * 0.25);
-    vm.root.rotation.set(vm.kick * 0.18 * (1 - 0.6 * vm.ads) - vm.spr * 0.2 - swing * 1.1, vm.spr * 0.75 + swing * 0.7, vm.spr * 0.3);
+    vm.root.rotation.set(vm.kick * 0.18 * (1 - 0.6 * vm.ads) - vm.spr * 0.2 - swing * 1.1 + rl * 0.35 + tap * 0.08, vm.spr * 0.75 + swing * 0.7 + rl * 0.25, vm.spr * 0.3 + rl * 0.7);
     flashMesh.visible = now < vm.flashUntil;
     if (flashMesh.visible) { flashMesh.position.copy(curVM().userData.muzzle); flashMesh.rotation.set(rand(0, 3), rand(0, 3), rand(0, 3)); flashMesh.scale.setScalar(curW().id === 0 || curW().id === 3 ? 1 : 1.8); }
   }
   if (state !== 'menu') updateHUD(dt);
+  updateInv();
   if (mode === 'online') netSend(false);
 
+  // big maps: the sun's shadow box follows the camera (snapped, so shadows don't shimmer)
+  if (LIMIT > 40) { const sx = Math.round(camera.position.x / 4) * 4, sz = Math.round(camera.position.z / 4) * 4; sun.position.set(sx + 25, 42, sz + 15); sun.target.position.set(sx, 0, sz); }
+  else { sun.position.set(25, 42, 15); sun.target.position.set(0, 0, 0); }
   renderer.clear();
   renderer.render(scene, camera);
   if (showVM) { renderer.clearDepth(); renderer.render(vmScene, vmCam); }
 }
 
 if (location.hostname === 'localhost') window.__spud = { player, net, ents, prog, Z, AIM, settings, tryFire, teamScore, storm,
+  CH, FLIGHT, useKey, startHeal, get LIMIT() { return LIMIT; },
   camAt: (x, y, z, tx, ty, tz) => { camHold = true; camera.position.set(x, y, z); camera.lookAt(tx, ty, tz); }, boxes, STAIRS, PADS, SPAWNS, startGame, toMenu: () => toMenu(), get game() { return game; }, get state() { return state; }, get now() { return now; } };
 resize();
 dressVM(); updateProfile();

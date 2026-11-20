@@ -27,11 +27,19 @@ export const AMMO = {
   heavy: { name: 'Heavy ammo', pack: 10, max: 40, color: 0x4c9a52 },
   rockets: { name: 'Rockets', pack: 2, max: 6, color: 0x7a6a45 },
 };
-// heals: hp restored (bandages only patch you up to cap), seconds to use (you move at half speed and can't shoot), how many you can carry
+// heals: hp restored (bandages only patch you up to cap), seconds to use (standing still; moving or shooting stops it), how many you can carry
 export const HEALS = { bandage: { name: 'Bandage', hp: 25, time: 2.2, max: 10, cap: 75 }, medkit: { name: 'Medkit', hp: 100, time: 5, max: 3 } };
 // chest guns by weight (weapon index, weight), and the color of each gun's loot beam (how good it is)
 export const CHEST_GUNS = [[0, 26], [1, 22], [2, 14], [3, 26], [4, 5]];
-export const RARITY = [0x8cc63f, 0x8cc63f, 0xb45be0, 0x2f8fe0, 0xffc83d, 0xcccccc];
+// battle royale gun rarity: every gun from a chest rolls one. Rarer ones hit harder and reload faster.
+// w: chance weight; dmg and reload: multipliers on the gun's own numbers
+export const RARITY = [
+  { name: 'Common', color: 0xb9b9b9, w: 44, dmg: 1, reload: 1 },
+  { name: 'Uncommon', color: 0x5fbf3a, w: 30, dmg: 1.08, reload: 0.95 },
+  { name: 'Rare', color: 0x2f8fe0, w: 16, dmg: 1.16, reload: 0.9 },
+  { name: 'Epic', color: 0xb45be0, w: 8, dmg: 1.25, reload: 0.85 },
+  { name: 'Legendary', color: 0xffc83d, w: 2, dmg: 1.35, reload: 0.8 },
+];
 export const MAX_SLOTS = 4; // the knife plus three guns
 // game types. Aim trainer is solo only.
 export const GAMES = { ffa: 'Free-for-all', tdm: 'Team Deathmatch', br: 'Battle Royale', zombies: 'Zombies', gungame: 'Gun Game', moon: 'Moon Knives', snipe: 'Snipers Only', aim: 'Aim Trainer' };
@@ -56,8 +64,8 @@ export const ACTIONS = [
   ['fwd', 'Move forward', 'KeyW'], ['back', 'Move back', 'KeyS'], ['left', 'Strafe left', 'KeyA'], ['right', 'Strafe right', 'KeyD'],
   ['jump', 'Jump', 'Space'], ['sprint', 'Sprint', 'ShiftLeft'], ['crouch', 'Crouch / slide', 'KeyC'],
   ['shoot', 'Shoot', 'Mouse0'], ['scope', 'Aim down sights', 'Mouse2'],
-  ['w1', 'Weapon 1', 'Digit1'], ['w2', 'Weapon 2', 'Digit2'], ['w3', 'Weapon 3', 'Digit3'], ['w4', 'Weapon 4', 'Digit4'], ['swap', 'Last weapon', 'KeyQ'],
-  ['reload', 'Reload', 'KeyR'], ['use', 'Open chest / pick up', 'KeyE'], ['heal', 'Use heal', 'KeyH'], ['nade', 'Throw equipment', 'KeyG'], ['scores', 'Show scores', 'Tab'], ['mute', 'Mute sound', 'KeyM'],
+  ['w1', 'Weapon 1', 'Digit1'], ['w2', 'Weapon 2', 'Digit2'], ['w3', 'Weapon 3', 'Digit3'], ['w4', 'Weapon 4', 'Digit4'], ['swap', 'Last weapon', 'KeyQ'], ['slotL', 'Move gun left in loadout', 'BracketLeft'], ['slotR', 'Move gun right in loadout', 'BracketRight'],
+  ['reload', 'Reload', 'KeyR'], ['use', 'Open chest / pick up', 'KeyE'], ['bandage', 'Use bandage', 'KeyB'], ['medkit', 'Use medkit', 'KeyN'], ['inv', 'Inventory (battle royale)', 'Tab'], ['map', 'Full map (battle royale)', 'KeyM'], ['nade', 'Throw equipment', 'KeyG'], ['scores', 'Show scores', 'KeyL'], ['mute', 'Mute sound', 'KeyK'],
 ];
 export const DEFAULT_BINDS = Object.fromEntries(ACTIONS.map(a => [a[0], a[2]]));
 const BLOCKED_KEYS = ['Escape', 'MetaLeft', 'MetaRight', 'OSLeft', 'OSRight', 'ContextMenu', 'F5', 'F11', 'F12'];
