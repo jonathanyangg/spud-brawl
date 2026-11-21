@@ -1122,7 +1122,9 @@ document.addEventListener('keydown', e => {
     else if (!e.repeat && (a === 'bandage' || a === 'medkit')) startHeal(player, a);
     return;
   }
-  if (e.code === 'Escape' && plWorks === false) { setState('paused'); return; }
+  // Esc pauses. With the mouse captured the browser takes Esc itself (see pointerlockchange); this covers the
+  // times it isn't: dead with the mouse freed for the death buttons, or after the browser refused to recapture it
+  if (e.code === 'Escape' && !e.repeat && !locked) { e.preventDefault(); setState('paused'); return; }
   if (e.code === 'Enter' && !e.repeat && !player.alive && mode !== 'online') { e.preventDefault(); playAgain(); return; }
   if (e.repeat) return;
   pressCode(e.code);
@@ -2916,7 +2918,7 @@ $('inviteBtn').addEventListener('click', async () => {
 $('pInviteBtn').addEventListener('click', () => copyInvite(settings.room, $('pInviteBtn'), $('pInviteOut')));
 $('roomIn').addEventListener('input', () => { $('inviteOut').hidden = true; showInviteMsg(''); });
 addEventListener('hashchange', () => { if (state === 'menu') applyInvite(); });
-$('resumeBtn').addEventListener('click', () => { if (plWorks === false) setState('playing'); else requestLock(); });
+$('resumeBtn').addEventListener('click', () => { if (plWorks === false || (!player.alive && mode !== 'online')) setState('playing'); else requestLock(); }); // dead: keep the mouse free for Play again
 if (matchMedia('(pointer: coarse)').matches && !matchMedia('(any-pointer: fine)').matches) $('touchNote').hidden = false;
 
 // ---------- main loop ----------
