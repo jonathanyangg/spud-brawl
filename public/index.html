@@ -56,6 +56,23 @@
     <div id="flashFx"></div>
   </div>
 
+  <div id="lobby" hidden>
+    <div class="lobbyCard lobbyTop">
+      <p class="lbl">Lobby</p>
+      <h2 id="lobbyTitle">Room</h2>
+      <p id="lobbyInfo"></p>
+    </div>
+    <div class="lobbyCard lobbyBottom">
+      <div id="lobbyList"></div>
+      <p id="lobbyMsg"></p>
+      <div class="actions" style="justify-content:center">
+        <button class="btn" id="lobbyStart" type="button">Start match</button>
+        <button class="btn ghost" id="lobbyInvite" type="button">Copy invite link</button>
+        <button class="btn ghost" id="lobbyLeave" type="button">Leave</button>
+      </div>
+      <input type="text" id="lobbyInviteOut" readonly aria-label="Invite link" hidden>
+    </div>
+  </div>
   <div class="overlay" id="menu">
     <div class="menu-inner">
       <h1 class="title">Spud<br>Brawl</h1>
@@ -397,6 +414,7 @@
       <table id="overTbl"></table>
       <div class="actions" style="justify-content:center">
         <button class="btn" id="againBtn" type="button">Play again</button>
+        <button class="btn ghost" id="lobbyBtn" type="button" hidden>Back to lobby</button>
         <button class="btn ghost" id="menuBtn" type="button">Main menu</button>
       </div>
     </div>

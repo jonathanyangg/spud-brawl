@@ -1712,7 +1712,7 @@ function netSend(force) {
     a: state === 'playing' && p.alive ? 1 : 0, dd: p.alive ? 0 : 1, hp: Math.ceil(p.hp), k: p.kills, d: p.deaths, ev: net.ev,
     cr: r2(p.crouch), sl: r2(p.slideK), tm: p.team, dr: p.drop ? DROP_ST.indexOf(p.drop.stage) : 0,
     bt: botHost() ? botState() : undefined, sto: botHost() && oneLife() ? stormState() : undefined, tsc: botHost() && teamsOn() ? teamScore() : undefined,
-    sk: prog.uniform, cm: prog.camo[p.guns[p.weapon].id], lv: P.level(prog), su: p.guns[p.weapon].sup ? 1 : 0,
+    sk: prog.uniform, cm: prog.camo[p.guns[p.weapon].id], lv: P.level(prog), su: p.guns[p.weapon].sup ? 1 : 0, lb: state === 'lobby' ? 1 : 0,
     z: game === 'zombies' && zHost() ? zombieState() : undefined });
 }
 function startOnline(code) {
@@ -1756,6 +1756,7 @@ function applyRemote(id, s) {
   if (typeof id !== 'string' || !/^[a-z0-9]{4,16}$/.test(id) || id === net.myPeer) return;
   let r = net.remotes.get(id);
   if (s.v !== 1 || !Array.isArray(s.p)) { if (r) removeRemote(r); return; }
+  if (state === 'lobby' && id === net.host && s.lb !== 1 && (s.m | 0) > net.lobbyFrom) { beginMatch(s.m | 0, false); }
   if (!r) {
     const name = cleanName(s.n) || 'Player', color = /^#[0-9a-f]{6}$/i.test(s.c) ? s.c : '#cccccc';
     r = newEntity(name, color, false);
@@ -1772,7 +1773,7 @@ function applyRemote(id, s) {
   r.target.set(clamp(num(s.p[0]), -pl, pl), clamp(num(s.p[1]), 0, 120), clamp(num(s.p[2]), -pl, pl));
   r.tyaw = num(s.yw); r.pitch = clamp(num(s.pt), -1.5, 1.5); r.weapon = clamp(s.w | 0, 0, WEAPONS.length - 1);
   r.hp = num(s.hp); r.kills = Math.max(0, s.k | 0); r.deaths = Math.max(0, s.d | 0); r.m = s.m | 0;
-  r.dead = s.dd === 1; // a: in play right now; dd: actually down (paused players are neither)
+  r.lobby = s.lb === 1; r.dead = s.dd === 1; // lb: waiting in the lobby; a: in play right now; dd: actually down (paused players are neither)
   r.crouch = clamp(num(s.cr), 0, 1); r.slideK = clamp(num(s.sl), 0, 1); r.su = s.su === 1;
   // their look: gun camo follows the weapon in hand; the tag shows their level
   const sk = cleanUniform(s.sk), cm = cleanCamo(s.cm), lv = cleanLevel(s.lv);
@@ -2837,22 +2838,24 @@ function endAim() {
 // ---------- state ----------
 function setState(s) {
   state = s;
-  setMusic(s === 'menu' ? 'menu' : null); // the soundtrack is for the menu only: matches are quiet
+  setMusic(s === 'menu' || s === 'lobby' ? 'menu' : null); // the soundtrack is for the menu (and lobby) only: matches are quiet
+  $('lobby').hidden = s !== 'lobby';
   if (s === 'menu') { $('armory').hidden = true; updateProfile(); }
   if (s !== 'playing') clearBanners();
   $('menu').hidden = s !== 'menu';
   $('pause').hidden = s !== 'paused';
   $('over').hidden = s !== 'over';
-  $('hud').hidden = s === 'menu';
+  $('hud').hidden = s === 'menu' || s === 'lobby';
   if (s !== 'playing') { for (const k in keys) keys[k] = false; $('board').hidden = true; }
   if (s === 'playing' || s === 'over') { $('controls').hidden = true; rebinding = null; $('settings').hidden = true; $('armory').hidden = true; }
   if (s === 'paused') { $('pInviteBtn').hidden = mode !== 'online'; $('pInviteOut').hidden = true; }
-  if (s === 'over') $('overTbl').hidden = false;
+  if (s === 'over') { $('overTbl').hidden = false; $('lobbyBtn').hidden = mode !== 'online'; }
   if (s === 'paused') {
     $('pauseTitle').textContent = 'Paused'; $('resumeBtn').textContent = 'Resume';
     $('pauseMsg').textContent = plWorks === false ? 'Press Resume when you are ready.' : 'Click Resume to grab the mouse again.';
   }
-  if (s === 'menu' || s === 'over') { $('death').hidden = true; if (document.pointerLockElement) document.exitPointerLock(); }
+  if (s === 'menu' || s === 'over' || s === 'lobby') { $('death').hidden = true; if (document.pointerLockElement) document.exitPointerLock(); }
+  if (s === 'lobby') { $('pause').hidden = true; endSpec(); closeInv(false); LB.key = ''; }
 }
 function setMap(name) {
   if (name === currentMap) return;
@@ -2892,7 +2895,8 @@ function startGame(fromLink = false) {
   leaderCache = null; updateScoreTop();
   $('death').hidden = true; shake = 0; dmgT = 0;
   initAudio();
-  if (fromLink) {
+  if (mode === 'online') { enterLobby(); }
+  else if (fromLink) {
     setState('paused');
     $('pauseTitle').textContent = `Room ${settings.room}`; $('resumeBtn').textContent = 'Play';
     $('pauseMsg').textContent = `You're joining as ${settings.name}.`;
@@ -2911,15 +2915,104 @@ function startGame(fromLink = false) {
 function playAgain() {
   if (mode !== 'online') return startGame();
   const hi = Math.max(net.m, ...[...net.remotes.values()].map(r => r.m));
-  net.m = hi > net.m ? hi : net.m + 1; // everyone who presses Play again lands on the same match number
+  beginMatch(hi > net.m ? hi : net.m + 1, true); // everyone who presses Play again lands on the same match number
+}
+// online: start match m (the host pressed Start, or Play again). mine: I clicked, so I can grab the mouse;
+// pulled in by the host, I wait on one click
+function beginMatch(m, mine) {
+  net.m = m;
   player.kills = player.deaths = 0; player.nadeReady = 0; resetRun(); resetZombies(); flashT = 0;
   teams.bank = [0, 0]; net.tscore = null; resetBR();
   for (const e of ents) if (e.ai) { e.kills = e.deaths = 0; respawn(e); }
   respawn(player); refreshVM(); endSpec();
   leaderCache = null; updateScoreTop(); $('death').hidden = true;
-  setState('playing'); netSend(true);
-  if (plWorks !== false) requestLock();
+  if (mine || plWorks === false) { setState('playing'); netSend(true); if (plWorks !== false) requestLock(); return; }
+  setState('paused'); netSend(true);
+  $('pauseTitle').textContent = 'Match started'; $('resumeBtn').textContent = 'Play';
+  $('pauseMsg').textContent = 'The host started the match. Click Play to jump in.'; $('resumeBtn').focus();
 }
+// ---------- the lobby: everyone in the room, standing in a line-up, until the host presses Start ----------
+const LB = { scene: new THREE.Scene(), cam: new THREE.PerspectiveCamera(35, 1, 0.1, 200), meshes: new Map(), key: '', t: 0, ui: 0 };
+{
+  LB.scene.background = new THREE.Color(0x2b2216); LB.scene.fog = new THREE.Fog(0x2b2216, 14, 40);
+  LB.scene.add(new THREE.HemisphereLight(0xfff1d6, 0x3a2c1a, 1.1));
+  const key = new THREE.DirectionalLight(0xffe2b0, 1.3); key.position.set(4, 8, 6); LB.scene.add(key);
+  const rim = new THREE.DirectionalLight(0x9fb8ff, 0.5); rim.position.set(-6, 4, -6); LB.scene.add(rim);
+  const floor = new THREE.Mesh(new THREE.CircleGeometry(30, 48), new THREE.MeshLambertMaterial({ color: 0x4a3a24 }));
+  floor.rotation.x = -Math.PI / 2; LB.scene.add(floor);
+}
+function enterLobby() {
+  net.lobbyFrom = net.m; setState('lobby'); netSend(true);
+}
+// the room's players in groups: squads in battle royale, Blue and Red in team deathmatch, otherwise one line
+function lobbyGroups() {
+  const all = [player, ...net.remotes.values()];
+  const by = new Map();
+  for (const e of all) { const k = alliesOn() && e.team !== undefined ? e.team : 0; if (!by.has(k)) by.set(k, []); by.get(k).push(e); }
+  return [...by.entries()].sort((a, b) => a[0] - b[0]).map(([t, list]) => ({ t, list: list.sort((a, b) => (a === player ? -1 : b === player ? 1 : a.name.localeCompare(b.name))) }));
+}
+const groupName = t => (teamsOn() ? TEAM_NAMES[t] : squadsOn() ? `Squad ${t + 1}` : 'Players');
+function updateLobby(dt) {
+  LB.t += dt;
+  const groups = lobbyGroups();
+  const looks = e => (e === player ? { uniform: prog.uniform, camo: prog.camo[player.guns[player.weapon].id], lv: P.level(prog) } : { uniform: e.sk, camo: e.cm, lv: e.lv });
+  const sig = e => { const l = looks(e); return [e.name, e.color, l.uniform, l.camo, l.lv].join('|'); };
+  const key = groups.map(g => g.t + ':' + g.list.map(e => (e === player ? 'me' : e.peer) + '=' + sig(e)).join(',')).join(';');
+  if (key !== LB.key) {
+    LB.key = key;
+    const keep = new Set();
+    for (const g of groups) for (const e of g.list) {
+      const id = e === player ? 'me' : e.peer, s = sig(e); keep.add(id);
+      const old = LB.meshes.get(id); if (old && old.sig === s) continue;
+      if (old) LB.scene.remove(old.mesh);
+      const mesh = soldierMesh(e.name, e.color, false, looks(e)); LB.scene.add(mesh); LB.meshes.set(id, { mesh, sig: s });
+    }
+    for (const [id, m] of LB.meshes) if (!keep.has(id)) { LB.scene.remove(m.mesh); LB.meshes.delete(id); }
+    // stand them in a row, a gap between groups, and pull the camera back to fit everyone
+    const gap = 1.1, sep = 2, n = groups.reduce((a, g) => a + g.list.length, 0), w = (n - 1) * gap + (groups.length - 1) * sep;
+    let x = -w / 2;
+    for (const g of groups) { for (const e of g.list) { const m = LB.meshes.get(e === player ? 'me' : e.peer); m.mesh.position.set(x, 0, 0); m.x = x; x += gap; } x += sep - gap; }
+    LB.dist = Math.max(9, w * 1.35 + 5);
+    renderLobbyUI(groups);
+  }
+  let i = 0;
+  for (const m of LB.meshes.values()) { m.mesh.rotation.y = Math.sin(LB.t * 0.6 + i++ * 1.3) * 0.25; }
+  const sway = Math.sin(LB.t * 0.15) * 0.6;
+  LB.cam.position.set(sway, 1.5, LB.dist || 7); LB.cam.lookAt(0, 0.55, 0); // aimed low so the line-up sits above the bottom card
+  if (performance.now() > LB.ui) { LB.ui = performance.now() + 500; renderLobbyUI(groups); }
+}
+function renderLobbyUI(groups) {
+  const isHost = net.host === net.myPeer, hostR = net.remotes.get(net.host);
+  setText('lobbyTitle', `Room ${settings.room}`);
+  const c = cfg(), bits = [GAMES[game], MAPS[net.map || currentMap]];
+  if (squadsOn()) bits.push(SQUAD_NAMES[c.sq]); else if (teamsOn()) bits.push(`${c.ts}v${c.ts}`);
+  if (oneLife() && c.hok) bits.push(`+${c.hok} HP per kill`);
+  setText('lobbyInfo', bits.join(' \u00b7 '));
+  const box = $('lobbyList'); box.textContent = '';
+  for (const g of groups) {
+    const col = document.createElement('div'); col.className = 'lbGroup';
+    const h = document.createElement('small'); h.textContent = groupName(g.t); col.append(h);
+    for (const e of g.list) {
+      const row = document.createElement('div'); row.className = 'lbRow';
+      const dot = document.createElement('i'); dot.style.background = e.color;
+      const n = document.createElement('b'); n.textContent = e === player ? `${e.name} (you)` : e.name;
+      const tag = document.createElement('span');
+      const id = e === player ? net.myPeer : e.peer;
+      tag.textContent = [id === net.host ? 'Host' : '', e === player || e.lobby ? 'Ready' : 'In a match', `Lv ${e === player ? P.level(prog) : e.lv || 1}`].filter(Boolean).join(' \u00b7 ');
+      row.append(dot, n, tag); col.append(row);
+    }
+    box.append(col);
+  }
+  const n = 1 + net.remotes.size;
+  setText('lobbyMsg', net.status !== 'ready' ? 'Connecting\u2026'
+    : isHost ? (n === 1 ? 'Waiting for friends. Send them the invite link, or start now: bots fill the empty seats.' : `${n} players here. Bots fill the empty seats. Start when everyone's in.`)
+    : `Waiting for ${hostR ? hostR.name : 'the host'} to start the match.`);
+  $('lobbyStart').hidden = !isHost; $('lobbyStart').disabled = net.status !== 'ready';
+}
+$('lobbyStart').addEventListener('click', () => { if (state === 'lobby') playAgain(); });
+$('lobbyLeave').addEventListener('click', () => toMenu());
+$('lobbyInvite').addEventListener('click', () => copyInvite(settings.room, $('lobbyInvite'), $('lobbyInviteOut')));
+$('lobbyBtn').addEventListener('click', () => { if (mode === 'online') enterLobby(); });
 function endGame(winner) {
   setState('over');
   const won = winner.isPlayer || (alliesOn() && winner.team === player.team);
@@ -3093,7 +3186,7 @@ function frame(t) {
 
   // view model
   const healing = state !== 'menu' && player.alive && !player.drop && !!player.useT;
-  const showVM = state !== 'menu' && player.alive && !player.drop && (healing || !(zoomed && camera.fov < 40));
+  const showVM = state !== 'menu' && state !== 'lobby' && player.alive && !player.drop && (healing || !(zoomed && camera.fov < 40));
   vm.root.visible = !healing; healVM.root.visible = healing;
   if (healing) poseHealVM(player.useT);
   if (showVM && !healing) {
@@ -3115,7 +3208,8 @@ function frame(t) {
     flashMesh.visible = now < vm.flashUntil;
     if (flashMesh.visible) { flashMesh.position.copy(curVM().userData.muzzle); flashMesh.rotation.set(rand(0, 3), rand(0, 3), rand(0, 3)); flashMesh.scale.setScalar(curW().id === 0 || curW().id === 3 ? 1 : 1.8); }
   }
-  if (state !== 'menu') updateHUD(dt);
+  if (state !== 'menu' && state !== 'lobby') updateHUD(dt);
+  if (state === 'lobby') updateLobby(dt);
   updateInv();
   if (mode === 'online') netSend(false);
 
@@ -3123,12 +3217,14 @@ function frame(t) {
   if (LIMIT > 40) { const sx = Math.round(camera.position.x / 4) * 4, sz = Math.round(camera.position.z / 4) * 4; sun.position.set(sx + 25, 42, sz + 15); sun.target.position.set(sx, 0, sz); }
   else { sun.position.set(25, 42, 15); sun.target.position.set(0, 0, 0); }
   renderer.clear();
-  renderer.render(scene, camera);
+  if (state === 'lobby') { LB.cam.aspect = camera.aspect; LB.cam.updateProjectionMatrix(); renderer.render(LB.scene, LB.cam); }
+  else renderer.render(scene, camera);
   if (showVM) { renderer.clearDepth(); renderer.render(vmScene, vmCam); }
 }
 
 if (location.hostname === 'localhost') window.__spud = { player, net, ents, prog, Z, AIM, settings, tryFire, teamScore, storm,
   CH, FLIGHT, useKey, startHeal, get LIMIT() { return LIMIT; },
+  applyRemote: (id, s) => applyRemote(id, s), enterLobby: () => enterLobby(),
   camAt: (x, y, z, tx, ty, tz) => { camHold = true; camera.position.set(x, y, z); camera.lookAt(tx, ty, tz); }, boxes, STAIRS, PADS, SPAWNS, startGame, toMenu: () => toMenu(), get game() { return game; }, get state() { return state; }, get now() { return now; } };
 resize();
 dressVM(); updateProfile();
