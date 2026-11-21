@@ -9,7 +9,10 @@ Arena shooter in the browser (three.js). Play vs bots offline, or online: browse
   Online, the room's creator picks whether players go on one team against bots, or get split evenly.
 - **Battle Royale:** one life. Everyone starts on a potato blimp that crosses the map: jump out over land, fall, open
   your glider and steer down. You land with only a knife. Chests (E) hold a gun, ammo for it and sometimes a bandage
-  or medkit (H; it takes a few seconds standing still; moving cancels it). Reloads use the ammo you carry, you can hold the
+  or medkit (B or N; it takes a few seconds standing still; moving cancels it), and sometimes frags (G to throw). X drops
+  the gun in your hands. Pick Solo, Duos, Trios or Squads: online, players in the same room fill squads in the order they
+  join and bots fill the rest; squadmates can't hurt each other, the last squad standing wins, and once you're out you
+  spectate your squad (Space for the next one). Heal on kill (+25 or +50 HP per elimination) is an option. Reloads use the ammo you carry, you can hold the
   knife and three guns, and whoever goes down drops what they had. The storm closes in over five phases, sized to the
   map, and starts after the drop. A minimap shows the circle, the blimp's route and chests near you. Last one
   standing wins.

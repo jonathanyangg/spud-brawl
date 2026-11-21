@@ -32,6 +32,7 @@
     <ul id="feed"></ul>
     <div id="cross"><i></i><i></i><i></i><i></i><b></b></div>
     <svg id="hitm" viewBox="0 0 30 30" aria-hidden="true"><g stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="3" y1="3" x2="10" y2="10"/><line x1="27" y1="3" x2="20" y2="10"/><line x1="3" y1="27" x2="10" y2="20"/><line x1="27" y1="27" x2="20" y2="20"/></g></svg>
+    <div id="squadHud" hidden></div>
     <div id="reloadTxt" hidden><b>Reloading <em id="reloadLeft"></em></b><span><i id="reloadFill"></i></span></div>
     <div id="prompt" hidden></div>
     <div id="lookTag" hidden><b id="lookName"></b><small id="lookStats"></small></div>
@@ -159,6 +160,24 @@
               <button type="button" data-v="5" aria-pressed="false">5v5</button>
             </div>
             <p class="help" id="tsHelp"></p>
+          </div>
+          <div class="row" id="rowSq">
+            <div class="lbl" id="sqLbl">Squads</div>
+            <div class="seg" id="sqSeg" role="group" aria-labelledby="sqLbl">
+              <button type="button" data-v="1" aria-pressed="true">Solo</button>
+              <button type="button" data-v="2" aria-pressed="false">Duos</button>
+              <button type="button" data-v="3" aria-pressed="false">Trios</button>
+              <button type="button" data-v="4" aria-pressed="false">Squads</button>
+            </div>
+            <p class="help" id="sqHelp"></p>
+          </div>
+          <div class="row" id="rowHok">
+            <div class="lbl" id="hokLbl">Heal on kill</div>
+            <div class="seg" id="hokSeg" role="group" aria-labelledby="hokLbl">
+              <button type="button" data-v="0" aria-pressed="true">Off</button>
+              <button type="button" data-v="25" aria-pressed="false">+25 HP</button>
+              <button type="button" data-v="50" aria-pressed="false">+50 HP</button>
+            </div>
           </div>
           <div class="row" id="rowSide">
             <div class="lbl" id="sideLbl">Players</div>
@@ -337,6 +356,14 @@
         <button class="btn ghost" id="deathMenu" type="button">Main menu</button>
       </div>
       <small id="deathKeys" hidden>or press Enter to play again</small>
+    </div>
+  </div>
+  <div id="spec" hidden>
+    <div class="specWho"><small>Spectating</small> <b id="specName"></b> <span id="specHp"></span></div>
+    <small id="specKeys"></small>
+    <div class="row" id="specBtns">
+      <button class="btn small" id="specNext" type="button">Next teammate</button>
+      <button class="btn ghost small" id="specAgain" type="button" hidden>Play again</button>
     </div>
   </div>
 

@@ -296,3 +296,23 @@ tr.me td{color:var(--butter)}
 /* inventory: drop a gun by dragging it here or off the box */
 #invDrop{margin-top:8px;border:1px dashed var(--line);border-radius:6px;padding:8px;text-align:center;font-size:11px;color:var(--muted)}
 #invDrop.over{border-color:var(--ketchup);color:var(--cream);background:rgba(229,67,45,.15)}
+
+/* battle royale squads: who's in yours, and spectating them once you're out */
+#rowSq[hidden]{display:none}
+#squadHud{position:absolute;left:16px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:6px;width:170px;pointer-events:none}
+#squadHud small{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em}
+#squadHud .sqRow{background:rgba(20,12,4,.55);border-radius:6px;padding:5px 8px}
+#squadHud .sqRow b{display:block;font-size:12px;color:var(--cream);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#squadHud .sqRow.me b{color:var(--butter)}
+#squadHud .sqRow span{display:block;height:4px;margin-top:4px;background:rgba(0,0,0,.5);border-radius:2px;overflow:hidden}
+#squadHud .sqRow i{display:block;height:100%;background:#5fd068}
+#squadHud .sqRow.out{opacity:.45}
+#squadHud .sqRow.out b{text-decoration:line-through}
+#spec{position:absolute;left:50%;top:22%;transform:translateX(-50%);z-index:4;background:rgba(20,12,4,.78);border:1px solid var(--line);border-radius:10px;padding:10px 16px;text-align:center;display:flex;flex-direction:column;gap:6px;align-items:center;max-width:calc(100% - 32px)}
+#spec[hidden]{display:none}
+#spec .specWho b{color:var(--cream);font-size:16px}
+#spec .specWho small,#spec #specKeys{color:var(--muted);font-size:12px}
+#spec #specHp{color:#5fd068;font-size:12px;margin-left:6px}
+#specBtns{display:flex;gap:8px;justify-content:center}
+#specBtns [hidden]{display:none}
+#pause:not([hidden]) ~ #spec,#settings:not([hidden]) ~ #spec,#controls:not([hidden]) ~ #spec,#armory:not([hidden]) ~ #spec,#over:not([hidden]) ~ #spec{display:none}

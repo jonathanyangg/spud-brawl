@@ -28,6 +28,7 @@ export const AMMO = {
   rockets: { name: 'Rockets', pack: 2, max: 6, color: 0x7a6a45 },
 };
 // heals: hp restored (bandages only patch you up to cap), seconds to use (standing still; moving or shooting stops it), how many you can carry
+export const FRAGS = { name: 'Frag', max: 6, cd: 1.2 }; // battle royale: frags are loot, thrown with the equipment key
 export const HEALS = { bandage: { name: 'Bandage', hp: 25, time: 2.2, max: 10, cap: 75 }, medkit: { name: 'Medkit', hp: 100, time: 5, max: 3 } };
 // chest guns by weight (weapon index, weight), and the color of each gun's loot beam (how good it is)
 export const CHEST_GUNS = [[0, 26], [1, 22], [2, 14], [3, 26], [4, 5]];

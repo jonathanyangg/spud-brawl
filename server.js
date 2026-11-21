@@ -20,7 +20,7 @@ const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; ch
 const server = createServer(async (req, res) => {
   if (req.url.startsWith('/api/')) return handleApi(req, res);
   if (req.url === '/rooms') { // the server browser: public rooms with someone in them
-    const list = [...rooms].filter(([, r]) => r.pub && r.peers.size).map(([code, r]) => ({ code, map: r.map, game: r.game, players: r.peers.size, max: MAX_PLAYERS, bots: r.cfg.bots, ts: r.cfg.ts }));
+    const list = [...rooms].filter(([, r]) => r.pub && r.peers.size).map(([code, r]) => ({ code, map: r.map, game: r.game, players: r.peers.size, max: MAX_PLAYERS, bots: r.cfg.bots, ts: r.cfg.ts, sq: r.cfg.sq }));
     return res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(list));
   }
   try {
@@ -52,7 +52,7 @@ wss.on('connection', (ws, req) => {
   if (!room) rooms.set(code, room = {
     map: MAPS.includes(q.get('map')) ? q.get('map') : MAPS[0], game: GAMES.includes(q.get('game')) ? q.get('game') : GAMES[0],
     cfg: { bots: int(q.get('bots'), 0, 11, 0), diff: DIFFS.includes(q.get('diff')) ? q.get('diff') : 'normal', ts: int(q.get('ts'), 1, 6, 4),
-      lim: int(q.get('lim'), 5, 100, 25), side: q.get('side') === 'split' ? 'split' : 'together' },
+      lim: int(q.get('lim'), 5, 100, 25), side: q.get('side') === 'split' ? 'split' : 'together', sq: int(q.get('sq'), 1, 4, 1), hok: [0, 25, 50].includes(+q.get('hok')) ? +q.get('hok') : 0 }, // sq: battle royale squad size; hok: health back per kill
     pub: q.get('pub') === '1', peers: new Map(),
   });
   const peers = room.peers, old = peers.get(id);
@@ -86,7 +86,14 @@ wss.on('connection', (ws, req) => {
 });
 
 // team deathmatch seats: 'together' fills the first team with players (bots make up the rest), 'split' evens them out
+// battle royale squads: players fill squad 0 first, then squad 1, and so on, sq to a squad (solos: nobody shares)
 function pickTeam(room) {
+  if (room.game === 'br') {
+    const sq = room.cfg.sq || 1, n = new Map(); if (sq <= 1) return 0;
+    for (const ws of room.peers.values()) n.set(ws.team | 0, (n.get(ws.team | 0) || 0) + 1);
+    let t = 0; while ((n.get(t) || 0) >= sq) t++;
+    return t;
+  }
   const n = [0, 0]; for (const ws of room.peers.values()) n[ws.team | 0]++;
   if (room.cfg.side === 'together') return n[0] < room.cfg.ts ? 0 : n[1] < room.cfg.ts ? 1 : n[0] <= n[1] ? 0 : 1;
   return n[0] <= n[1] ? 0 : 1;

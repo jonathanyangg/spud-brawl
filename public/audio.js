@@ -46,6 +46,9 @@ export const sfx = {
   reload: () => { tone(500, 0.04, 0.08, 'square'); setTimeout(() => tone(700, 0.04, 0.08, 'square'), 120); },
   chest: (v = 1) => { tone(420, 0.12, 0.15 * v, 'triangle', 620); setTimeout(() => tone(880, 0.22, 0.14 * v, 'triangle'), 110); noise(0.25, 1400, 0.08 * v, 'bandpass', 2); },
   pick: () => tone(900, 0.05, 0.1, 'triangle', 1300),
+  // a footstep: a soft scuff and a low thud (v: loudness, from distance and how fast they move)
+  step: (v = 1) => { noise(0.06, 700 + Math.random() * 400, 0.16 * v, 'bandpass', 1.4); tone(85 + Math.random() * 20, 0.05, 0.07 * v, 'sine', 55); },
+  land: (v = 1) => { noise(0.12, 500, 0.25 * v, 'bandpass', 1); tone(70, 0.09, 0.12 * v, 'sine', 45); },
   heal: () => { tone(520, 0.12, 0.12, 'sine', 780); setTimeout(() => tone(780, 0.2, 0.12, 'sine'), 120); },
   glider: () => noise(0.5, 500, 0.2, 'bandpass', 0.8),
   pad: () => { tone(260, 0.3, 0.16, 'sine', 900); noise(0.25, 900, 0.1, 'bandpass', 1.5); },
