@@ -292,3 +292,7 @@ tr.me td{color:var(--butter)}
 /* empty loadout slots still show their key */
 #slots span.empty{opacity:.5;border-style:dashed}
 .invGun.empty{flex-direction:column;gap:2px}
+
+/* inventory: drop a gun by dragging it here or off the box */
+#invDrop{margin-top:8px;border:1px dashed var(--line);border-radius:6px;padding:8px;text-align:center;font-size:11px;color:var(--muted)}
+#invDrop.over{border-color:var(--ketchup);color:var(--cream);background:rgba(229,67,45,.15)}

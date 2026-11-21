@@ -1091,6 +1091,7 @@ function pressCode(code) {
   else if (a === 'w3') switchWeapon(player, slotIdx(player, 2));
   else if (a === 'w4') switchWeapon(player, slotIdx(player, 3));
   else if (a === 'use') useKey(player);
+  else if (a === 'dropGun') dropGun(player, player.weapon);
   else if (a === 'bandage' || a === 'medkit') startHeal(player, a);
   else if (a === 'inv') openInv();
   else if (a === 'map') toggleBigMap();
@@ -1154,7 +1155,7 @@ function renderKeyHelp() {
     `${kb(binds.jump)} Jump`, `${kb(binds.sprint)} Sprint`, `${kb(binds.crouch)} Crouch \u00b7 slide while sprinting`,
     `${kb(binds.shoot)} Shoot`, `${kb(binds.scope)} Aim down sights`,
     `${kb(binds.w1)}${kb(binds.w2)}${kb(binds.w3)}${kb(binds.w4)} ${kb(binds.swap)} Switch weapon`,
-    `${kb(binds.use)} Open chest \u00b7 pick up &nbsp;${kb(binds.bandage)} Bandage &nbsp;${kb(binds.medkit)} Medkit &nbsp;${kb(binds.slotL)}${kb(binds.slotR)} Reorder guns &nbsp;${kb(binds.inv)} Inventory (battle royale)`,
+    `${kb(binds.use)} Open chest \u00b7 pick up &nbsp;${kb(binds.dropGun)} Drop weapon &nbsp;${kb(binds.bandage)} Bandage &nbsp;${kb(binds.medkit)} Medkit &nbsp;${kb(binds.slotL)}${kb(binds.slotR)} Reorder guns &nbsp;${kb(binds.inv)} Inventory (battle royale)`,
     `${kb(binds.reload)} Reload`, `${kb(binds.nade)} Throw equipment`,
     `${kb(binds.map)} Full map &nbsp;${kb(binds.scores)} Scores &nbsp;${kb(binds.mute)} Mute`,
   ].map(s => `<div>${s}</div>`).join('');
@@ -1353,6 +1354,16 @@ const gunStats = g => {
     ['Reload', g.kind === 'melee' ? '\u2013' : g.reload.toFixed(1) + 's'], ['Range', g.range + ' m'],
     ['Ammo', at ? AMMO[at].name : 'none'], ['Rarity', g.kind === 'melee' ? '\u2013' : R.name]];
 };
+{
+  const dz = $('invDrop'), inv = $('inv');
+  const take = ev => { ev.preventDefault(); dz.classList.remove('over'); if (invDrag >= 0) dropGun(player, invDrag); invDrag = -1; renderInv(); };
+  dz.addEventListener('dragover', ev => { if (invDrag >= 0) { ev.preventDefault(); dz.classList.add('over'); } });
+  dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+  dz.addEventListener('drop', take);
+  // outside the box: the dimmed backdrop itself
+  inv.addEventListener('dragover', ev => { if (invDrag >= 0 && ev.target === inv) ev.preventDefault(); });
+  inv.addEventListener('drop', ev => { if (ev.target === inv) take(ev); });
+}
 const invSig = () => { const p = player; return [p.weapon, ...p.guns.map((g, i) => g.name + (g.rar | 0) + ':' + p.ammo[i] + '@' + g.slot), JSON.stringify(p.res), JSON.stringify(p.heals), binds.w1, binds.w2, binds.w3, binds.w4].join('|'); };
 function renderInv() {
   fixSlots(player);
@@ -2273,6 +2284,24 @@ function dropItems(e, list) {
   const x = r2(e.pos.x), y = r2(e.pos.y), z = r2(e.pos.z);
   if (mode === 'online') { spillItems(net.myPeer + ':' + (net.seq + 1), list, x, y, z); netEvent('dp', x, y, z, ...encItems(list)); }
   else spillItems('l' + ++CH.seq, list, x, y, z);
+}
+// battle royale: put a gun down at your feet (never the knife). The gun in your hands goes back to the knife.
+function dropGun(e, i) {
+  if (!oneLife() || !e.alive || e.drop) return;
+  const g = e.guns[i];
+  if (!g || g.kind === 'melee') { if (e.isPlayer && g) toast("You can't drop the knife"); return; }
+  dropItems(e, [{ kind: 'gun', w: g.id, qty: Math.max(1, e.ammo[i]), r: g.rar | 0 }]);
+  if (e.reloading && e.reloadWeapon === i) e.reloading = false;
+  e.guns.splice(i, 1); e.ammo.splice(i, 1);
+  const fix = k => (k > i ? k - 1 : k === i ? -1 : k);
+  if (e.reloading) e.reloadWeapon = fix(e.reloadWeapon);
+  const prev = fix(e.prevWeapon);
+  if (e.weapon === i) {
+    const k = e.guns.findIndex(x => x.kind === 'melee'); e.weapon = k >= 0 ? k : 0;
+    e.useT = null; e.nextShot = Math.max(e.nextShot, now + 0.3); if (e.isPlayer) vm.switchT = 0.3;
+  } else e.weapon = fix(e.weapon);
+  e.prevWeapon = prev < 0 ? e.weapon : prev;
+  if (e.isPlayer) { dressVM(); refreshVM(); sfx.pick(); toast('Dropped <em></em>', `${RARITY[g.rar | 0].name} ${g.name}`, false); }
 }
 function dropAll(e) {
   const list = [];
