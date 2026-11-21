@@ -2988,7 +2988,7 @@ function renderLobbyUI(groups) {
   if (squadsOn()) bits.push(SQUAD_NAMES[c.sq]); else if (teamsOn()) bits.push(`${c.ts}v${c.ts}`);
   if (oneLife() && c.hok) bits.push(`+${c.hok} HP per kill`);
   setText('lobbyInfo', bits.join(' \u00b7 '));
-  const listKey = JSON.stringify([isHost, net.host, groups.map(g => [g.t, g.list.map(e => [e.peer, e.name, e.color, e.lobby, e.lv])])]);
+  const listKey = JSON.stringify([isHost, net.host, game, cfg().sq, groups.map(g => [g.t, g.list.map(e => [e.peer, e.name, e.color, e.lobby, e.lv])])]);
   const box = $('lobbyList');
   if (box.dataset.k !== listKey) { box.dataset.k = listKey; box.textContent = ''; } else groups = [];
   for (const g of groups) {
