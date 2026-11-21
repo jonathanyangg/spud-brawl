@@ -324,7 +324,7 @@ tr.me td{color:var(--butter)}
 .lobbyTop h2{font-family:var(--display);font-size:clamp(24px,5vw,34px);margin:0;color:var(--butter);line-height:1}
 .lobbyTop p{margin:0;color:var(--muted)}
 #lobbyList{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;width:100%}
-.lbGroup{display:flex;flex-direction:column;gap:4px;min-width:170px;flex:1 1 170px;max-width:240px;text-align:left}
+.lbGroup{display:flex;flex-direction:column;gap:4px;min-width:170px;flex:1 1 170px;max-width:300px;text-align:left}
 .lbGroup small{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em}
 .lbRow{display:flex;align-items:center;gap:8px;background:rgba(0,0,0,.25);border-radius:6px;padding:5px 8px}
 .lbRow i{width:10px;height:10px;border-radius:50%;flex:none}
@@ -333,3 +333,14 @@ tr.me td{color:var(--butter)}
 #lobbyMsg{margin:0;color:var(--muted);font-size:13px}
 #lobbyInviteOut{width:100%}
 #lobbyStart[hidden],#lobbyBtn[hidden]{display:none}
+
+/* the lobby leader's controls */
+#lobbySet{display:flex;flex-wrap:wrap;gap:8px 12px;justify-content:center;width:100%}
+#lobbySetWrap{width:100%}
+#lobbySetWrap[hidden]{display:none}
+#lobbySetWrap summary{cursor:pointer;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
+#lobbySetWrap summary:hover{color:var(--cream)}
+.lbSet{display:flex;flex-direction:column;gap:3px;text-align:left;min-width:120px}
+.lbSet small{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+.lbSet select{background:rgba(0,0,0,.35);color:var(--cream);border:1px solid var(--line);border-radius:6px;padding:5px 6px;font:inherit;font-size:13px}
+.lbRow .lbLead{padding:2px 8px;font-size:11px;min-height:0}

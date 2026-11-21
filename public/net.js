@@ -35,6 +35,8 @@ export function joinRoom(code, id, opts, { onPeer, onLeave, onStatus, onRoom, on
   connect();
   return {
     presence(pr) { mine = JSON.stringify(pr); send(); },
+    // a one-off message for the server itself (the leader's room settings, handing over the lead)
+    control(msg) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg)); },
     leave() { dead = true; clearTimeout(retryT); if (ws) ws.close(); },
   };
 }

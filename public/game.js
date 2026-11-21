@@ -1720,8 +1720,8 @@ function startOnline(code) {
   net.room = joinRoom(code, net.myPeer, opts, {
     onPeer: applyRemote,
     onHost: setHost,
-    onRoom: ({ map, game: g, cfg: c, team, host }) => {
-      net.map = map;
+    onRoom: ({ map, game: g, cfg: c, team, host, pub }) => {
+      net.map = map; net.pub = pub !== false;
       const changed = GAMES[g] && g !== 'aim' && g !== game;
       if (changed) { game = g; resetZombies(); player.kills = player.deaths = 0; toast('This room plays <em></em>', GAMES[g], false); }
       if (c && typeof c === 'object') net.cfg = { bots: clamp(c.bots | 0, 0, 11), diff: DIFF[c.diff] ? c.diff : 'normal', ts: clamp(c.ts | 0, 1, 6), lim: clamp(c.lim | 0, 5, 100), side: c.side, sq: clamp(c.sq | 0, 1, 4), hok: [0, 25, 50].includes(c.hok) ? c.hok : 0 };
@@ -2988,7 +2988,9 @@ function renderLobbyUI(groups) {
   if (squadsOn()) bits.push(SQUAD_NAMES[c.sq]); else if (teamsOn()) bits.push(`${c.ts}v${c.ts}`);
   if (oneLife() && c.hok) bits.push(`+${c.hok} HP per kill`);
   setText('lobbyInfo', bits.join(' \u00b7 '));
-  const box = $('lobbyList'); box.textContent = '';
+  const listKey = JSON.stringify([isHost, net.host, groups.map(g => [g.t, g.list.map(e => [e.peer, e.name, e.color, e.lobby, e.lv])])]);
+  const box = $('lobbyList');
+  if (box.dataset.k !== listKey) { box.dataset.k = listKey; box.textContent = ''; } else groups = [];
   for (const g of groups) {
     const col = document.createElement('div'); col.className = 'lbGroup';
     const h = document.createElement('small'); h.textContent = groupName(g.t); col.append(h);
@@ -2998,8 +3000,14 @@ function renderLobbyUI(groups) {
       const n = document.createElement('b'); n.textContent = e === player ? `${e.name} (you)` : e.name;
       const tag = document.createElement('span');
       const id = e === player ? net.myPeer : e.peer;
-      tag.textContent = [id === net.host ? 'Host' : '', e === player || e.lobby ? 'Ready' : 'In a match', `Lv ${e === player ? P.level(prog) : e.lv || 1}`].filter(Boolean).join(' \u00b7 ');
-      row.append(dot, n, tag); col.append(row);
+      tag.textContent = [id === net.host ? 'Leader' : '', e === player || e.lobby ? 'Ready' : 'In a match', `Lv ${e === player ? P.level(prog) : e.lv || 1}`].filter(Boolean).join(' \u00b7 ');
+      row.append(dot, n, tag);
+      if (isHost && e !== player) { // hand the lead to them
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'btn ghost small lbLead'; b.textContent = 'Make leader';
+        b.addEventListener('click', () => { if (net.room) net.room.control({ t: 'lead', k: e.peer }); });
+        row.append(b);
+      }
+      col.append(row);
     }
     box.append(col);
   }
@@ -3008,6 +3016,36 @@ function renderLobbyUI(groups) {
     : isHost ? (n === 1 ? 'Waiting for friends. Send them the invite link, or start now: bots fill the empty seats.' : `${n} players here. Bots fill the empty seats. Start when everyone's in.`)
     : `Waiting for ${hostR ? hostR.name : 'the host'} to start the match.`);
   $('lobbyStart').hidden = !isHost; $('lobbyStart').disabled = net.status !== 'ready';
+  renderLobbySet(isHost);
+}
+// the leader's controls: game, map and that game's options. Each change goes to the server, which tells everyone.
+function renderLobbySet(isHost) {
+  const box = $('lobbySet'), c = cfg(), map = net.map || currentMap;
+  const key = JSON.stringify([isHost, game, map, c, net.pub]);
+  $('lobbySetWrap').hidden = !isHost; if (!isHost || box.dataset.k === key) return;
+  box.dataset.k = key; box.textContent = '';
+  const send = msg => { if (net.room) net.room.control({ t: 'set', ...msg }); };
+  const pick = (label, opts, val, on) => {
+    const w = document.createElement('label'); w.className = 'lbSet';
+    const s = document.createElement('small'); s.textContent = label;
+    const sel = document.createElement('select');
+    for (const [v, t] of opts) { const o = document.createElement('option'); o.value = String(v); o.textContent = t; sel.append(o); }
+    sel.value = String(val); sel.addEventListener('change', () => on(sel.value));
+    w.append(s, sel); box.append(w);
+  };
+  pick('Game', Object.entries(GAMES).filter(([k]) => k !== 'aim'), game, v => send({ game: v }));
+  pick('Map', Object.entries(MAPS), map, v => send({ map: v }));
+  if (game === 'br') {
+    pick('Squads', [[1, 'Solo'], [2, 'Duos'], [3, 'Trios'], [4, 'Squads']], c.sq || 1, v => send({ sq: +v }));
+    pick('Heal on kill', [[0, 'Off'], [25, '+25 HP'], [50, '+50 HP']], c.hok || 0, v => send({ hok: +v }));
+  }
+  if (game === 'tdm') {
+    pick('Teams', [1, 2, 3, 4, 5].map(n => [n, `${n}v${n}`]), c.ts, v => send({ ts: +v }));
+    pick('Score to win', [[15, '15'], [25, '25'], [50, '50']], c.lim, v => send({ lim: +v }));
+    pick('Players', [['together', 'Together vs bots'], ['split', 'Split evenly']], c.side, v => send({ side: v }));
+  } else if (game !== 'zombies') pick('Bots', [0, 3, 5, 7, 11].map(n => [n, n ? String(n) : 'None']), c.bots, v => send({ bots: +v }));
+  if (game !== 'zombies') pick('Bot skill', [['easy', 'Easy'], ['normal', 'Normal'], ['hard', 'Hard']], c.diff, v => send({ diff: v }));
+  pick('Who can join', [['true', 'Public: listed'], ['false', 'Private: code only']], String(net.pub !== false), v => send({ pub: v === 'true' }));
 }
 $('lobbyStart').addEventListener('click', () => { if (state === 'lobby') playAgain(); });
 $('lobbyLeave').addEventListener('click', () => toMenu());
@@ -3224,7 +3262,7 @@ function frame(t) {
 
 if (location.hostname === 'localhost') window.__spud = { player, net, ents, prog, Z, AIM, settings, tryFire, teamScore, storm,
   CH, FLIGHT, useKey, startHeal, get LIMIT() { return LIMIT; },
-  applyRemote: (id, s) => applyRemote(id, s), enterLobby: () => enterLobby(),
+  applyRemote: (id, s) => applyRemote(id, s), renderLobbyUI: () => renderLobbyUI(lobbyGroups()), enterLobby: () => enterLobby(),
   camAt: (x, y, z, tx, ty, tz) => { camHold = true; camera.position.set(x, y, z); camera.lookAt(tx, ty, tz); }, boxes, STAIRS, PADS, SPAWNS, startGame, toMenu: () => toMenu(), get game() { return game; }, get state() { return state; }, get now() { return now; } };
 resize();
 dressVM(); updateProfile();

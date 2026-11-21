@@ -60,7 +60,7 @@ wss.on('connection', (ws, req) => {
   else if (peers.size >= MAX_PLAYERS) { ws.send('{"t":"full"}'); ws.close(); return; }
   else ws.team = pickTeam(room);
   peers.set(id, ws);
-  ws.send(JSON.stringify({ t: 'room', map: room.map, game: room.game, cfg: room.cfg, team: ws.team, host: peers.keys().next().value }));
+  ws.send(roomMsg(room, ws));
 
   // catch the newcomer up on everyone already here
   for (const [k, peer] of peers) if (k !== id && peer.last) ws.send(relay(k, peer.last));
@@ -70,7 +70,22 @@ wss.on('connection', (ws, req) => {
   ws.on('message', (data, isBinary) => {
     if (isBinary) return;
     const raw = data.toString();
-    try { const o = JSON.parse(raw); if (!o || typeof o !== 'object' || Array.isArray(o)) return; } catch { return; }
+    let o; try { o = JSON.parse(raw); if (!o || typeof o !== 'object' || Array.isArray(o)) return; } catch { return; }
+    // the room's leader (its first peer) can change the room's settings and hand the lead to someone else
+    if (o.t === 'set' || o.t === 'lead') {
+      if (peers.keys().next().value !== id) return;
+      if (o.t === 'set') {
+        setRoom(room, o);
+        const seated = []; for (const peer of peers.values()) { peer.team = pickTeam(room, seated); seated.push(peer); } // seat everyone again
+        for (const peer of peers.values()) if (peer.readyState === 1) peer.send(roomMsg(room, peer));
+      } else if (typeof o.k === 'string' && o.k !== id && peers.has(o.k)) {
+        const list = [...peers], i = list.findIndex(([k]) => k === o.k), [lead] = list.splice(i, 1);
+        peers.clear(); for (const [k, v] of [lead, ...list]) peers.set(k, v);
+        const msg = JSON.stringify({ t: 'host', k: o.k });
+        for (const peer of peers.values()) if (peer.readyState === 1) peer.send(msg);
+      }
+      return;
+    }
     ws.last = raw;
     const msg = relay(id, raw);
     for (const [k, peer] of peers) if (k !== id && peer.readyState === 1) peer.send(msg);
@@ -85,16 +100,33 @@ wss.on('connection', (ws, req) => {
   });
 });
 
+// what a player is told about the room: its map, game, settings, their seat, and who leads
+const roomMsg = (room, ws) => JSON.stringify({ t: 'room', map: room.map, game: room.game, cfg: room.cfg, pub: room.pub, team: ws.team, host: room.peers.keys().next().value });
+// the leader's changes, checked like a new room's
+function setRoom(room, o) {
+  const c = room.cfg, has = k => o[k] !== undefined && o[k] !== null;
+  if (MAPS.includes(o.map)) room.map = o.map;
+  if (GAMES.includes(o.game)) room.game = o.game;
+  if (has('bots')) c.bots = int(o.bots, 0, 11, c.bots);
+  if (DIFFS.includes(o.diff)) c.diff = o.diff;
+  if (has('ts')) c.ts = int(o.ts, 1, 6, c.ts);
+  if (has('lim')) c.lim = int(o.lim, 5, 100, c.lim);
+  if (o.side === 'split' || o.side === 'together') c.side = o.side;
+  if (has('sq')) c.sq = int(o.sq, 1, 4, c.sq);
+  if ([0, 25, 50].includes(o.hok)) c.hok = o.hok;
+  if (typeof o.pub === 'boolean') room.pub = o.pub;
+}
 // team deathmatch seats: 'together' fills the first team with players (bots make up the rest), 'split' evens them out
 // battle royale squads: players fill squad 0 first, then squad 1, and so on, sq to a squad (solos: nobody shares)
-function pickTeam(room) {
+// seated: the players already placed (all of the room's by default)
+function pickTeam(room, seated = [...room.peers.values()]) {
   if (room.game === 'br') {
     const sq = room.cfg.sq || 1, n = new Map(); if (sq <= 1) return 0;
-    for (const ws of room.peers.values()) n.set(ws.team | 0, (n.get(ws.team | 0) || 0) + 1);
+    for (const ws of seated) n.set(ws.team | 0, (n.get(ws.team | 0) || 0) + 1);
     let t = 0; while ((n.get(t) || 0) >= sq) t++;
     return t;
   }
-  const n = [0, 0]; for (const ws of room.peers.values()) n[ws.team | 0]++;
+  const n = [0, 0]; for (const ws of seated) n[ws.team | 0]++;
   if (room.cfg.side === 'together') return n[0] < room.cfg.ts ? 0 : n[1] < room.cfg.ts ? 1 : n[0] <= n[1] ? 0 : 1;
   return n[0] <= n[1] ? 0 : 1;
 }
