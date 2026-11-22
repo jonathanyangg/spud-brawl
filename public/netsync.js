@@ -1,5 +1,5 @@
 // Online play: the presence this game streams through the relay, other players' presences and events, and who hosts the room.
-import { DIFF, GAMES, HATS, TEAM_COLORS, WEAPONS, WNAMES } from './config.js';
+import { AMMO_OF, DIFF, GAMES, HATS, TEAM_COLORS, WEAPONS, WNAMES } from './config.js';
 import { LIMIT, MAPS, currentMap } from './world.js';
 import { sfx, sfxShot } from './audio.js';
 import { joinRoom } from './net.js';
@@ -53,7 +53,13 @@ export function netSend(force) {
     cr: r2(p.crouch), sl: r2(p.slideK), tm: p.team, dr: p.drop ? DROP_ST.indexOf(p.drop.stage) : 0,
     bt: botHost() ? botState() : undefined, sto: botHost() && oneLife() ? stormState() : undefined, tsc: botHost() && teamsOn() ? teamScore() : undefined,
     sk: prog.uniform, cm: prog.camo[p.guns[p.weapon].id], lv: P.level(prog), su: p.guns[p.weapon].sup ? 1 : 0, lb: state === 'lobby' ? 1 : 0, rd: state === 'lobby' && net.ready ? 1 : 0, ov: state === 'over' ? 1 : 0,
-    z: game === 'zombies' && zHost() ? zombieState() : undefined });
+    z: game === 'zombies' && zHost() ? zombieState() : undefined, iv: oneLife() && p.alive ? invState(p) : undefined });
+}
+// battle royale: what I carry, for a squadmate spectating me: [held gun, its mag, spare ammo for it, bandages, medkits,
+// frags, then id, rarity and slot for each gun]
+function invState(p) {
+  const w = p.guns[p.weapon], at = w && AMMO_OF[w.id];
+  return [p.weapon, p.ammo[p.weapon] | 0, at ? p.res[at] | 0 : 0, p.heals.bandage | 0, p.heals.medkit | 0, p.frags | 0, ...p.guns.flatMap(g => [g.id, g.rar | 0, g.slot | 0])];
 }
 export function startOnline(code) {
   const opts = { map: settings.map, game, bots: settings.bots, diff: settings.diff, ts: settings.ts, lim: settings.lim, side: settings.side, sq: settings.sq, hok: settings.hok, pub: settings.pub ? 1 : 0 };
@@ -116,6 +122,7 @@ export function applyRemote(id, s, seat) {
   const pl = LIMIT * 1.5; // riders on the blimp can be past the edge, and high up
   r.target.set(clamp(num(s.p[0]), -pl, pl), clamp(num(s.p[1]), 0, 120), clamp(num(s.p[2]), -pl, pl));
   r.tyaw = num(s.yw); r.pitch = clamp(num(s.pt), -1.5, 1.5); r.weapon = clamp(s.w | 0, 0, WEAPONS.length - 1);
+  r.iv = Array.isArray(s.iv) && s.iv.length <= 40 ? s.iv : null;
   r.hp = num(s.hp); r.kills = Math.max(0, s.k | 0); r.deaths = Math.max(0, s.d | 0); r.m = s.m | 0;
   r.lobby = s.lb === 1; r.ready = s.rd === 1; r.over = s.ov === 1; r.dead = s.dd === 1; // lb: waiting in the lobby; a: in play right now; dd: actually down (paused players are neither)
   r.crouch = clamp(num(s.cr), 0, 1); r.slideK = clamp(num(s.sl), 0, 1); r.su = s.su === 1;

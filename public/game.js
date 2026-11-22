@@ -934,6 +934,7 @@ function pressCode(code) {
   const a = actionFor(code);
   if (a === 'shoot') { fireLatch = true; triggerUsed = false; }
   if (a === 'scores') { buildTable($('boardTbl')); $('board').hidden = false; }
+  if (a === 'map') { toggleBigMap(); return; } // works dead too, while you spectate
   if (!player.alive || !a) return;
   if (player.drop) { if (a === 'jump') dropPress(player); return; }
   if (a === 'w1') switchWeapon(player, slotIdx(player, 0));
@@ -944,7 +945,6 @@ function pressCode(code) {
   else if (a === 'dropGun') dropGun(player, player.weapon);
   else if (a === 'bandage' || a === 'medkit') startHeal(player, a);
   else if (a === 'inv') openInv();
-  else if (a === 'map') toggleBigMap();
   else if (a === 'swap') switchWeapon(player, player.prevWeapon);
   else if (a === 'slotL') moveSlot(player, -1);
   else if (a === 'slotR') moveSlot(player, 1);

@@ -64,23 +64,37 @@ export function buildTable(tbl) {
     c(levelOf(e)); c(e.kills); c(e.deaths); tbl.appendChild(tr);
   });
 }
+// whose health and guns the HUD shows: mine, or while I'm down, the squadmate I spectate
+function shown() {
+  const e = !player.alive && spec.who;
+  if (!e) return player;
+  if (e.ai) return e; // an offline squadmate bot: the real thing
+  const v = e.iv, guns = []; // a player sends what they carry (netsync's invState)
+  if (v) for (let i = 6; i + 2 < v.length && guns.length < MAX_SLOTS; i += 3) {
+    const W = WEAPONS[v[i] | 0]; if (W) guns.push({ ...W, rar: clamp(v[i + 1] | 0, 0, RARITY.length - 1), slot: v[i + 2] | 0, mine: true });
+  }
+  if (!guns.length) return { hp: e.hp, guns: [WEAPONS[e.weapon] || WEAPONS[0]], weapon: 0, ammo: [], res: {}, heals: null, frags: null }; // a host's bot: no inventory
+  const weapon = clamp(v[0] | 0, 0, guns.length - 1), ammo = [], res = {}, at = AMMO_OF[guns[weapon].id];
+  ammo[weapon] = Math.max(0, v[1] | 0); if (at) res[at] = Math.max(0, v[2] | 0);
+  return { hp: e.hp, guns, weapon, ammo, res, heals: { bandage: Math.max(0, v[3] | 0), medkit: Math.max(0, v[4] | 0) }, frags: Math.max(0, v[5] | 0), isPlayer: true };
+}
 export function updateHUD(dt) {
-  const p = player, w = p.guns[p.weapon];
-  setText('hpnum', String(Math.ceil(p.hp)));
-  const hpb = $('hpbar'); hpb.style.width = p.hp + '%'; hpb.style.backgroundColor = p.hp < 35 ? 'var(--ketchup)' : p.hp < 65 ? 'var(--butter)' : 'var(--herb)';
+  const p = player, v = shown(), w = v.guns[v.weapon], hp = clamp(v.hp || 0, 0, 100);
+  setText('hpnum', String(Math.ceil(hp)));
+  const hpb = $('hpbar'); hpb.style.width = hp + '%'; hpb.style.backgroundColor = hp < 35 ? 'var(--ketchup)' : hp < 65 ? 'var(--butter)' : 'var(--herb)';
   setText('wname', w.name); $('wname').style.color = oneLife() && w.kind !== 'melee' ? rarCss(w.rar) : '';
-  const spare = carries(p) && AMMO_OF[w.id] ? p.res[AMMO_OF[w.id]] | 0 : w.mag; // battle royale shows what you carry
-  const ammo = $('ammo'), s = w.kind === 'melee' ? 'melee' : `${p.ammo[p.weapon]}|${spare}`;
-  if (txtCache.get('ammo') !== s) { txtCache.set('ammo', s); ammo.innerHTML = w.kind === 'melee' ? '&ndash;' : `${p.ammo[p.weapon]} <small>/ ${spare}</small>`; }
+  const spare = carries(v) && AMMO_OF[w.id] ? v.res[AMMO_OF[w.id]] | 0 : w.mag; // battle royale shows what you carry
+  const mag = v.ammo[v.weapon], ammo = $('ammo'), s = w.kind === 'melee' || mag === undefined ? 'melee' : `${mag}|${spare}`;
+  if (txtCache.get('ammo') !== s) { txtCache.set('ammo', s); ammo.innerHTML = s === 'melee' ? '&ndash;' : `${mag} <small>/ ${spare}</small>`; }
   // each slot shows the key you bound to it
-  const br = oneLife(), sk = i => keyName(binds['w' + (i + 1)] || '');
-  if (br) fixSlots(p);
-  const slotKey = [br, ...p.guns.map(g => g.name + (g.rar | 0) + '@' + g.slot), ...[1, 2, 3, 4].map(i => binds['w' + i])].join();
+  const br = oneLife() && v.isPlayer, sk = i => keyName(binds['w' + (i + 1)] || '');
+  if (br) fixSlots(v);
+  const slotKey = [br, ...v.guns.map(g => g.name + (g.rar | 0) + '@' + g.slot), ...[1, 2, 3, 4].map(i => binds['w' + i])].join();
   if (txtCache.get('slots') !== slotKey) {
     txtCache.set('slots', slotKey); $('slots').textContent = '';
-    const list = br ? [...Array(MAX_SLOTS).keys()].map(s => slotIdx(p, s)) : p.guns.map((g, i) => i);
+    const list = br ? [...Array(MAX_SLOTS).keys()].map(s => slotIdx(v, s)) : v.guns.map((g, i) => i);
     list.forEach((i, s) => {
-      const g = p.guns[i], sp = document.createElement('span'); sp.dataset.i = i;
+      const g = v.guns[i], sp = document.createElement('span'); sp.dataset.i = i;
       if (!g) { sp.className = 'empty'; sp.textContent = `${sk(s)} –`; $('slots').append(sp); return; }
       sp.textContent = s < 4 ? `${sk(s)} ${g.name}` : g.name;
       if (br && g.kind !== 'melee') { // battle royale: each slot wears its gun's rarity color
@@ -91,10 +105,10 @@ export function updateHUD(dt) {
       $('slots').append(sp);
     });
   }
-  [...$('slots').children].forEach(el => el.classList.toggle('on', +el.dataset.i === p.weapon));
-  $('nade').hidden = !nadesOn();
+  [...$('slots').children].forEach(el => el.classList.toggle('on', +el.dataset.i === v.weapon));
+  $('nade').hidden = !nadesOn() || v.frags === null;
   if (oneLife()) { // battle royale: frags you've found
-    setText('nade', `${keyName(binds.nade)} \u00b7 ` + (p.frags > 0 ? `${p.frags} frag${p.frags > 1 ? 's' : ''}` : 'no frags')); $('nade').classList.toggle('ready', p.frags > 0 && now >= p.nadeReady);
+    setText('nade', `${keyName(binds.nade)} \u00b7 ` + (v.frags > 0 ? `${v.frags} frag${v.frags > 1 ? 's' : ''}` : 'no frags')); $('nade').classList.toggle('ready', v.frags > 0 && (v !== p || now >= p.nadeReady));
   } else {
     const nd = Math.ceil(p.nadeReady - now), nn = (THROWABLES[p.nade] || THROWABLES.frag).name;
     setText('nade', `${keyName(binds.nade)} \u00b7 ` + (nd > 0 ? `${nn} in ${nd}s` : `${nn} ready`)); $('nade').classList.toggle('ready', nd <= 0);
@@ -300,8 +314,8 @@ function updateBRHud() {
     setText('lookName', `${R.name} ${W.name}`);
     setText('lookStats', `${Math.round(W.dmg * R.dmg)} dmg${W.pellets > 1 ? ' × ' + W.pellets : ''} · ${W.mag} mag · ${(W.reload * R.reload).toFixed(1)}s reload`);
   }
-  $('heals').hidden = !oneLife();
-  if (oneLife()) setText('heals', `${keyName(binds.bandage)} · ${p.heals.bandage | 0} bandage${p.heals.bandage === 1 ? '' : 's'} · ${keyName(binds.medkit)} · ${p.heals.medkit | 0} medkit${p.heals.medkit === 1 ? '' : 's'}`);
+  const hl = shown().heals; $('heals').hidden = !oneLife() || !hl;
+  if (oneLife() && hl) setText('heals', `${keyName(binds.bandage)} · ${hl.bandage | 0} bandage${hl.bandage === 1 ? '' : 's'} · ${keyName(binds.medkit)} · ${hl.medkit | 0} medkit${hl.medkit === 1 ? '' : 's'}`);
   const u = p.useT; $('useBar').hidden = !u;
   if (u) { setText('useName', `${HEALS[u.type].name}…`); $('useFill').style.width = (100 * clamp((now - u.start) / (u.end - u.start), 0, 1)).toFixed(1) + '%'; }
   drawMinimap();
