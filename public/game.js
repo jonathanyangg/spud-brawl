@@ -2111,7 +2111,7 @@ function setState(s) {
   if (s !== 'playing') { for (const k in keys) keys[k] = false; $('board').hidden = true; }
   if (s === 'playing' || s === 'over') { $('controls').hidden = true; rebinding = null; $('settings').hidden = true; $('armory').hidden = true; }
   if (s === 'paused') { $('pInviteBtn').hidden = mode !== 'online'; $('pInviteOut').hidden = true; }
-  if (s === 'over') { $('overTbl').hidden = false; $('lobbyBtn').hidden = mode !== 'online'; }
+  if (s === 'over') { $('overTbl').hidden = false; $('lobbyBtn').hidden = mode !== 'online'; $('againBtn').textContent = mode === 'online' ? 'Ready for the next one' : 'Play again'; }
   if (s === 'paused') {
     $('pauseTitle').textContent = 'Paused'; $('resumeBtn').textContent = 'Resume';
     $('pauseMsg').textContent = plWorks === false ? 'Press Resume when you are ready.' : 'Click Resume to grab the mouse again.';
@@ -2157,7 +2157,7 @@ function startGame(fromLink = false) {
   scoresChanged(); updateScoreTop();
   $('death').hidden = true; shake = 0; fx.dmg = 0;
   initAudio();
-  if (mode === 'online') { enterLobby(); }
+  if (mode === 'online') { net.ready = false; enterLobby(); } // in the lobby nobody is ready until they say so
   else if (fromLink) {
     setState('paused');
     $('pauseTitle').textContent = `Room ${settings.room}`; $('resumeBtn').textContent = 'Play';
@@ -2179,7 +2179,7 @@ function playAgain() {
   const hi = Math.max(net.m, ...[...net.remotes.values()].map(r => r.m));
   beginMatch(hi > net.m ? hi : net.m + 1, true); // everyone who presses Play again lands on the same match number
 }
-// online: start match m (the host pressed Start, or Play again). mine: I clicked, so I can grab the mouse;
+// online: start match m (everyone in the lobby was ready). mine: I clicked, so I can grab the mouse;
 // pulled in by the host, I wait on one click
 export function beginMatch(m, mine) {
   net.m = m;
@@ -2189,13 +2189,13 @@ export function beginMatch(m, mine) {
   respawn(player); refreshVM(); endSpec();
   scoresChanged(); updateScoreTop(); $('death').hidden = true;
   net.rosterAt = 0; // the host seats this match's bots right away (they board the blimp with everyone)
-  if (mine && oneLife()) { net.unlockDue = false; sendLock(true); } // only does anything for the leader
+  if (oneLife() && net.host === net.myPeer) { net.unlockDue = false; sendLock(true); } // the leader locks the room for the match
   if (mine || plWorks === false) { setState('playing'); netSend(true); if (plWorks !== false) requestLock(); return; }
   setState('paused'); netSend(true);
   $('pauseTitle').textContent = 'Match started'; $('resumeBtn').textContent = 'Play';
-  $('pauseMsg').textContent = 'The host started the match. Click Play to jump in.'; $('resumeBtn').focus();
+  $('pauseMsg').textContent = 'Everyone was ready, so the match started. Click Play to jump in.'; $('resumeBtn').focus();
 }
-// ---------- the lobby: everyone in the room, standing in a line-up, until the host presses Start ----------
+// ---------- the lobby: everyone in the room, standing in a line-up, until everyone is ready ----------
 const LB = { scene: new THREE.Scene(), cam: new THREE.PerspectiveCamera(35, 1, 0.1, 200), meshes: new Map(), key: '', t: 0, ui: 0 };
 {
   LB.scene.background = new THREE.Color(0x2b2216); LB.scene.fog = new THREE.Fog(0x2b2216, 14, 40);
@@ -2204,6 +2204,12 @@ const LB = { scene: new THREE.Scene(), cam: new THREE.PerspectiveCamera(35, 1, 0
   const rim = new THREE.DirectionalLight(0x9fb8ff, 0.5); rim.position.set(-6, 4, -6); LB.scene.add(rim);
   const floor = new THREE.Mesh(new THREE.CircleGeometry(30, 48), new THREE.MeshLambertMaterial({ color: 0x4a3a24 }));
   floor.rotation.x = -Math.PI / 2; LB.scene.add(floor);
+}
+const START_DELAY = 3000; // ms from everyone ready to the match starting
+// the leader's game starts the match on its own, so nobody clicked: everyone (the leader too) gets the "Click Play" card
+function startFromLobby() {
+  const hi = Math.max(net.m, ...[...net.remotes.values()].map(r => r.m));
+  beginMatch(hi > net.m ? hi : net.m + 1, false);
 }
 function enterLobby() {
   net.lobbyFrom = net.m; setState('lobby'); netSend(true);
@@ -2249,7 +2255,7 @@ function updateLobby(dt) {
   if (performance.now() > LB.ui) { LB.ui = performance.now() + 500; renderLobbyUI(groups); }
 }
 function renderLobbyUI(groups) {
-  const isHost = net.host === net.myPeer, hostR = net.remotes.get(net.host);
+  const isHost = net.host === net.myPeer;
   setText('lobbyTitle', `Room ${settings.room}`);
   const c = cfg(), bits = [GAMES[game], MAPS[net.map || currentMap]];
   if (squadsOn()) bits.push(SQUAD_NAMES[c.sq]); else if (teamsOn()) bits.push(`${c.ts}v${c.ts}`);
@@ -2267,7 +2273,7 @@ function renderLobbyUI(groups) {
       const n = document.createElement('b'); n.textContent = e === player ? `${e.name} (you)` : e.name;
       const tag = document.createElement('span');
       const id = e === player ? net.myPeer : e.peer;
-      tag.textContent = [id === net.host ? 'Leader' : '', e === player ? (net.ready || isHost ? 'Ready' : 'Not ready') : !e.lobby ? 'In a match' : e.ready || id === net.host ? 'Ready' : 'Not ready', `Lv ${e === player ? P.level(prog) : e.lv || 1}`].filter(Boolean).join(' \u00b7 ');
+      tag.textContent = [id === net.host ? 'Leader' : '', e === player ? (net.ready ? 'Ready' : 'Not ready') : !e.lobby ? 'In a match' : e.ready ? 'Ready' : 'Not ready', `Lv ${e === player ? P.level(prog) : e.lv || 1}`].filter(Boolean).join(' \u00b7 ');
       row.append(dot, n, tag);
       if (isHost && e !== player) { // hand the lead to them
         const b = document.createElement('button'); b.type = 'button'; b.className = 'btn ghost small lbLead'; b.textContent = 'Make leader';
@@ -2283,13 +2289,20 @@ function renderLobbyUI(groups) {
   const still = stillInMatch();
   // and the room stays locked until then, so nobody joins and the settings can't re-seat the squads mid-match
   if (isHost && !still && net.unlockDue && net.status === 'ready') { net.unlockDue = false; sendLock(false); }
+  // the match starts by itself a few seconds after everyone in the room is in the lobby and ready (the leader's game
+  // starts it); anyone who un-readies in that time stops the countdown
+  const waiting = [...net.remotes.values()].filter(r => !r.lobby || !r.ready).length + (net.ready ? 0 : 1);
+  const go = net.status === 'ready' && !still && !waiting && !(isHost && net.unlockDue);
+  if (!go) net.goAt = 0; else if (!net.goAt) net.goAt = performance.now() + START_DELAY;
+  const left = Math.max(0, Math.ceil((net.goAt - performance.now()) / 1000));
   setText('lobbyMsg', net.status !== 'ready' ? 'Connecting\u2026'
-    : isHost && still ? `${still} player${still > 1 ? 's are' : ' is'} still alive in the last match. You can change settings and start when it ends.`
-    : isHost ? (n === 1 ? 'Waiting for friends. Send them the invite link, or start now: bots fill the empty seats.' : `${n} players here. Bots fill the empty seats. Start when everyone's in.`)
-    : !net.ready ? `Not ready: you'll sit out the next match until you press Ready.`
-    : `Waiting for ${hostR ? hostR.name : 'the host'} to start the match.`);
-  $('lobbyStart').hidden = !isHost; $('lobbyStart').disabled = net.status !== 'ready' || still > 0;
-  $('lobbyReady').hidden = isHost; $('lobbyReady').textContent = net.ready ? 'Not ready' : 'Ready';
+    : still ? `${still} player${still > 1 ? 's are' : ' is'} still alive in the last match. The next one can start when it ends.`
+    : go ? `Everyone's ready. Starting in ${left}\u2026`
+    : !net.ready ? (n === 1 ? 'Press Ready to start: bots fill the empty seats. Or send friends the invite link first.' : `Press Ready. The match starts once all ${n} of you are ready; bots fill the empty seats.`)
+    : `Waiting for ${waiting} more player${waiting > 1 ? 's' : ''} to get ready.`);
+  $('lobbyStart').hidden = true;
+  $('lobbyReady').hidden = false; $('lobbyReady').textContent = net.ready ? 'Not ready' : 'Ready'; $('lobbyReady').classList.toggle('ghost', net.ready);
+  if (go && isHost && performance.now() >= net.goAt) { net.goAt = 0; startFromLobby(); }
   renderLobbySet(isHost, still > 0);
 }
 // the leader's controls: game, map and that game's options. Each change goes to the server, which tells everyone.
@@ -2326,7 +2339,7 @@ $('lobbyStart').addEventListener('click', () => { if (state === 'lobby') playAga
 $('lobbyReady').addEventListener('click', () => { net.ready = !net.ready; netSend(true); renderLobbyUI(lobbyGroups()); });
 $('lobbyLeave').addEventListener('click', () => toMenu());
 $('lobbyInvite').addEventListener('click', () => copyInvite(settings.room, $('lobbyInvite'), $('lobbyInviteOut')));
-$('lobbyBtn').addEventListener('click', () => { if (mode === 'online') enterLobby(); });
+$('lobbyBtn').addEventListener('click', () => { if (mode === 'online') { net.ready = false; enterLobby(); } });
 export function endGame(winner) {
   setState('over'); sendLock(false);
   const won = winner.isPlayer || (alliesOn() && winner.team === player.team);
@@ -2417,7 +2430,7 @@ segment('mapSeg', 'map', v => v, () => { if (state === 'menu') { setMap(settings
 $('nameIn').value = settings.name;
 $('nameIn').addEventListener('keydown', e => { if (e.key === 'Enter' && !$('playBtn').hidden) $('playBtn').click(); });
 $('playBtn').addEventListener('click', () => (settings.mode === 'online' ? createRoom() : startGame()));
-$('againBtn').addEventListener('click', playAgain);
+$('againBtn').addEventListener('click', () => (mode === 'online' ? deathToLobby(true) : playAgain())); // online: back to the lobby, ready
 $('deathAgain').addEventListener('click', () => (mode === 'online' ? deathToLobby(true) : playAgain()));
 $('deathMenu').addEventListener('click', () => (mode === 'online' ? deathToLobby(false) : toMenu()));
 $('menuBtn').addEventListener('click', toMenu);
