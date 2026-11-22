@@ -108,6 +108,7 @@ wss.on('connection', (ws, req) => {
         room.seats = new Map(room.locked ? [...peers].map(([k, v]) => [k, v.team]) : []);
         if (!room.locked) for (const k of [...room.keys.keys()]) if (!peers.has(k)) room.keys.delete(k); // match over: forget who left
       } else if (o.t === 'set') {
+        if (room.locked) return; // mid battle royale: re-seating would reshuffle the squads of players still in it
         setRoom(room, o);
         const seated = []; for (const peer of peers.values()) { peer.team = pickTeam(room, seated); seated.push(peer); } // seat everyone again
         for (const peer of peers.values()) if (peer.readyState === 1) peer.send(roomMsg(room, peer));

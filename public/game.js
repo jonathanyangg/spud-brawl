@@ -2185,7 +2185,7 @@ export function beginMatch(m, mine) {
   respawn(player); refreshVM(); endSpec();
   scoresChanged(); updateScoreTop(); $('death').hidden = true;
   net.rosterAt = 0; // the host seats this match's bots right away (they board the blimp with everyone)
-  if (mine && oneLife()) sendLock(true); // only does anything for the leader
+  if (mine && oneLife()) { net.unlockDue = false; sendLock(true); } // only does anything for the leader
   if (mine || plWorks === false) { setState('playing'); netSend(true); if (plWorks !== false) requestLock(); return; }
   setState('paused'); netSend(true);
   $('pauseTitle').textContent = 'Match started'; $('resumeBtn').textContent = 'Play';
@@ -2203,8 +2203,10 @@ const LB = { scene: new THREE.Scene(), cam: new THREE.PerspectiveCamera(35, 1, 0
 }
 function enterLobby() {
   net.lobbyFrom = net.m; setState('lobby'); netSend(true);
-  sendLock(false);
+  net.unlockDue = true; // the lobby unlocks the room once nobody from the match is still alive (renderLobbyUI)
 }
+// battle royale: players from the last match who are still alive in it
+const stillInMatch = () => (oneLife() ? [...net.remotes.values()].filter(r => !r.lobby && !r.dead && !r.over).length : 0);
 // the room's players in groups: squads in battle royale, Blue and Red in team deathmatch, otherwise one line
 function lobbyGroups() {
   const all = [player, ...net.remotes.values()];
@@ -2274,20 +2276,23 @@ function renderLobbyUI(groups) {
   }
   const n = 1 + net.remotes.size;
   // battle royale: the leader can't start the next one while anyone is still alive in the last one
-  const still = oneLife() ? [...net.remotes.values()].filter(r => !r.lobby && !r.dead && !r.over).length : 0;
+  const still = stillInMatch();
+  // and the room stays locked until then, so nobody joins and the settings can't re-seat the squads mid-match
+  if (isHost && !still && net.unlockDue && net.status === 'ready') { net.unlockDue = false; sendLock(false); }
   setText('lobbyMsg', net.status !== 'ready' ? 'Connecting\u2026'
-    : isHost && still ? `${still} player${still > 1 ? 's are' : ' is'} still alive in the last match. You can start when it ends.`
+    : isHost && still ? `${still} player${still > 1 ? 's are' : ' is'} still alive in the last match. You can change settings and start when it ends.`
     : isHost ? (n === 1 ? 'Waiting for friends. Send them the invite link, or start now: bots fill the empty seats.' : `${n} players here. Bots fill the empty seats. Start when everyone's in.`)
     : !net.ready ? `Not ready: you'll sit out the next match until you press Ready.`
     : `Waiting for ${hostR ? hostR.name : 'the host'} to start the match.`);
   $('lobbyStart').hidden = !isHost; $('lobbyStart').disabled = net.status !== 'ready' || still > 0;
   $('lobbyReady').hidden = isHost; $('lobbyReady').textContent = net.ready ? 'Not ready' : 'Ready';
-  renderLobbySet(isHost);
+  renderLobbySet(isHost, still > 0);
 }
 // the leader's controls: game, map and that game's options. Each change goes to the server, which tells everyone.
-function renderLobbySet(isHost) {
+// busy: a battle royale is still going (the server ignores changes then), so the controls are greyed out
+function renderLobbySet(isHost, busy) {
   const box = $('lobbySet'), c = cfg(), map = net.map || currentMap;
-  const key = JSON.stringify([isHost, game, map, c, net.pub]);
+  const key = JSON.stringify([isHost, busy, game, map, c, net.pub]);
   $('lobbySetWrap').hidden = !isHost; if (!isHost || box.dataset.k === key) return;
   box.dataset.k = key; box.textContent = '';
   const send = msg => { if (net.room) net.room.control({ t: 'set', ...msg }); };
@@ -2296,7 +2301,7 @@ function renderLobbySet(isHost) {
     const s = document.createElement('small'); s.textContent = label;
     const sel = document.createElement('select');
     for (const [v, t] of opts) { const o = document.createElement('option'); o.value = String(v); o.textContent = t; sel.append(o); }
-    sel.value = String(val); sel.addEventListener('change', () => on(sel.value));
+    sel.value = String(val); sel.disabled = busy; sel.addEventListener('change', () => on(sel.value));
     w.append(s, sel); box.append(w);
   };
   pick('Game', Object.entries(GAMES).filter(([k]) => k !== 'aim'), game, v => send({ game: v }));

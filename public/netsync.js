@@ -220,6 +220,7 @@ export function checkWinOnline() {
 // the server says who runs the bots; if that's now me, I take over the ones I was drawing, as they were
 function setHost(id) {
   net.host = typeof id === 'string' ? id : null;
+  if (net.host === net.myPeer && state === 'lobby') net.unlockDue = true; // took the lead in the lobby: unlock when the match is over
   if (!botHost() || !net.bots.size) return;
   const sum = [0, 0];
   for (const nb of [...net.bots.values()]) {
