@@ -199,7 +199,7 @@ async function startServer(port, extra = {}) {
   const env = { ...process.env, PORT: String(port), ...extra };
   for (const k of ACCOUNT_VARS) if (!(k in extra)) delete env[k];
   const child = spawn(process.execPath, ['server.js'], { env, stdio: 'pipe' }); servers.push(child);
-  child.stderr.on('data', d => { if (!/coin packs stay off|accounts stay off|without our metadata|^\s*$/.test(d)) process.stderr.write(d); });
+  child.stderr.on('data', d => { if (!/coin packs stay off|accounts stay off|without our metadata|SITE_URL is not set|^\s*$/.test(d)) process.stderr.write(d); });
   await new Promise((res, rej) => { child.stdout.once('data', res); child.once('exit', c => rej(new Error(`server exited ${c}`))); });
   return child;
 }

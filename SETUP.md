@@ -13,7 +13,8 @@ You need about 20 minutes. Do it all in **test mode** first; no real money moves
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase: the secret key (`sb_secret_...`) or the legacy `service_role` key | **yes**, server only |
 | `STRIPE_SECRET_KEY` | Stripe: test secret key `sk_test_...` | **yes** |
 | `STRIPE_WEBHOOK_SECRET` | Stripe: the webhook's signing secret `whsec_...` | **yes** |
-| `SITE_URL` (optional) | `https://spud-brawl.onrender.com`; pins Stripe's return links instead of using the request's host | no |
+| `SITE_URL` | `https://spud-brawl.onrender.com`; pins Stripe's return links. Without it they use each request's `Host` header, and the server warns at startup | no |
+| `MAX_ROOMS`, `MAX_PER_IP` (optional) | flood limits: rooms on the server (default 300) and sockets from one address (default 16) | no |
 
 Accounts switch on when all three `SUPABASE_*` vars are set. Coin packs show only when accounts are on **and** both
 Stripe vars are set, so nobody can pay without the webhook that credits them.
@@ -52,7 +53,7 @@ Stripe vars are set, so nobody can pay without the webhook that credits them.
 
 ## 3. Render
 
-1. Open the **spud-brawl** service → **Environment** → add the five vars (six with `SITE_URL`) → **Save changes**.
+1. Open the **spud-brawl** service → **Environment** → add the five vars and `SITE_URL` (your service's public URL) → **Save changes**.
    Render redeploys by itself.
 2. Check: `https://spud-brawl.onrender.com/api/config` should now show `"accounts":true,"payments":true,"testMode":true`
    and never any secret key.
@@ -100,3 +101,11 @@ or double-spend. Stripe credits come only from signature-checked webhooks, once 
 
 Looks are cosmetic and, like the rest of the netcode, drawn by each client: a modified client could show itself wearing
 a shop look it doesn't own. That costs nobody money.
+
+XP and level come from the player's own game, so the cloud save can't prove them. It limits how fast they grow instead:
+XP fills a bucket at 600 a minute of real time, up to 30,000 at once, and kill, match and win counts can't outrun the XP
+that got in. An edited save climbs no faster than a very good player.
+
+Matches trust each client with its own health and hits, so public rooms are labelled casual. The relay does stop
+impersonation: each game has a secret key next to its public player id, and only that key gets its seat back on a
+reconnect. It also drops floods (60 messages a second per socket, 16 sockets per address, 300 rooms).

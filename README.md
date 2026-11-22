@@ -117,7 +117,7 @@ Music can be turned off in the menu; **K** mutes everything (rebind it in Contro
 
 Pick **Online with friends**, type a room code, press **Join room**. **Copy invite link** gives a URL that drops friends into the same room. Up to 12 players per room. Whoever opens a room picks its game and map; everyone who joins plays those.
 
-Each client owns its own health: shooters report hits, and the player who was hit applies the damage and announces their own death. That's fine for friends, but it trusts the clients.
+Each client owns its own health: shooters report hits, and the player who was hit applies the damage and announces their own death. That's fine for friends, but it trusts the clients, so the server browser labels public rooms casual. The relay checks a secret key on reconnects (nobody can take your seat with your public id) and rate-limits each socket.
 
 In Zombies, one player runs the zombies for the room (the lowest player id still in the match) and streams them with their presence; everyone else sends their hits on zombies to that player. If they leave, the next player picks the zombies up where they are.
 

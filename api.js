@@ -16,6 +16,7 @@ const stripe = env.STRIPE_SECRET_KEY ? new (await import('stripe')).default(env.
 // selling coins needs somewhere to put them (accounts) and a way to hear about payments (webhook secret)
 export const paymentsOn = !!(stripe && WEBHOOK_SECRET && accountsOn);
 if (SB_URL && ANON && !SERVICE) console.warn('SUPABASE_SERVICE_ROLE_KEY is missing: accounts stay off');
+if (paymentsOn && !env.SITE_URL) console.warn('SITE_URL is not set: Stripe return links use the Host header of each request. Set it to your public URL, like https://spud-brawl.onrender.com');
 if (stripe && !paymentsOn) console.warn('Stripe key set, but coin packs stay off until Supabase and STRIPE_WEBHOOK_SECRET are set too');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
