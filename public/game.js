@@ -260,6 +260,11 @@ function soldierMesh(name, color, addToScene = true, look = {}) {
 }
 function poseSoldier(e, dt) {
   const m = e.mesh, u = m.userData, sp = Math.hypot(e.vel.x, e.vel.z);
+  if (u.tag) {
+    const ally = sameTeam(e, player);
+    u.tag.visible = ally || !versus(); // zombies and the range: everyone's on your side
+    if (u.tag.material.depthTest === ally) { u.tag.material.depthTest = !ally; u.tag.renderOrder = ally ? 10 : 0; }
+  }
   const run = Math.min(1, sp / 6) * (1 - e.slideK), c = e.crouch * (1 - e.slideK), s = e.slideK;
   u.bob += dt * sp * 1.9;
   const ph = Math.floor(u.bob / Math.PI);
@@ -451,7 +456,7 @@ function teamScore() {
 function winnerNow() {
   if (!versus()) return null;
   if (oneLife()) { // last one standing, once there were at least two
-    const field = ents.filter(e => !e.zombie && (!e.remote || e.netbot || e.m === net.m)), up = field.filter(e => (e.remote && !e.netbot ? !e.dead : e.alive));
+    const field = ents.filter(inMatch), up = field.filter(isAliveNow);
     if (squadsOn()) { // last squad standing
       const sq = new Set(field.map(e => e.team)), live = new Set(up.map(e => e.team));
       if (sq.size < 2 || live.size > 1) return null;
@@ -1752,7 +1757,7 @@ function removeRemote(r) {
   const i = ents.indexOf(r); if (i >= 0) ents.splice(i, 1);
   leaderCache = null; if (state !== 'menu') updateScoreTop();
 }
-function applyRemote(id, s) {
+function applyRemote(id, s, seat) {
   if (typeof id !== 'string' || !/^[a-z0-9]{4,16}$/.test(id) || id === net.myPeer) return;
   let r = net.remotes.get(id);
   if (s.v !== 1 || !Array.isArray(s.p)) { if (r) removeRemote(r); return; }
@@ -1780,7 +1785,8 @@ function applyRemote(id, s) {
   if (sk !== r.sk) { r.sk = sk; applyLook(r.mesh.userData.uniM, sk); }
   if (cm !== r.cm) { r.cm = cm; applyLook(r.mesh.userData.gunM, cm); }
   if (lv !== r.lv) { r.lv = lv; setTag(r.mesh, r.name, r.color, lv); }
-  r.team = teamsOn() ? (s.tm === 0 || s.tm === 1 ? s.tm : undefined) : squadsOn() && Number.isInteger(s.tm) && s.tm >= 0 && s.tm < 12 ? s.tm : undefined;
+  const tm = Number.isInteger(seat) && seat >= 0 ? seat : s.tm; // the server's seat when it sends one
+  r.team = teamsOn() ? (tm === 0 || tm === 1 ? tm : undefined) : squadsOn() && Number.isInteger(tm) && tm >= 0 && tm < 12 ? tm : undefined;
   if (game === 'zombies' && s.z && r.m === net.m && hostPeer() === id) syncZombies(s.z);
   if (id === net.host && !botHost() && r.m === net.m) {
     syncBots(s.bt); if (oneLife()) syncStorm(s.sto);
@@ -1899,6 +1905,7 @@ function syncBots(list) {
       b.mesh = soldierMesh(name, b.color, true, randomLook()); b.mesh.visible = false;
       net.bots.set(id, b); ents.push(b); leaderCache = null;
     }
+    b.team = team;
     const pl = LIMIT * 1.5;
     b.target.set(clamp(num(a[3]), -pl, pl), clamp(num(a[4]), 0, 120), clamp(num(a[5]), -pl, pl));
     b.tyaw = num(a[6]); b.pitch = clamp(num(a[7]), -1.5, 1.5); b.weapon = clamp(a[8] | 0, 0, WEAPONS.length - 1);
@@ -1931,7 +1938,7 @@ function setHost(id) {
     removeNetBot(nb);
     const b = makeBot(nb.team, cfg().diff, nb.name, nb.bid);
     b.kills = nb.kills; b.deaths = nb.deaths;
-    if (nb.alive) { b.pos.copy(nb.target); b.yaw = nb.tyaw; b.mesh.position.copy(b.pos); } else { b.alive = false; b.mesh.visible = false; b.respawnAt = now + 2; }
+    if (nb.alive) { b.pos.copy(nb.target); b.yaw = nb.tyaw; b.mesh.position.copy(b.pos); } else { b.alive = false; b.mesh.visible = false; b.respawnAt = oneLife() ? Infinity : now + 2; }
     if (teamsOn() && b.team !== undefined) sum[b.team] += b.kills;
   }
   if (net.tscore && teamsOn()) for (const e of humansInMatch()) if (e.team !== undefined) sum[e.team] += e.kills;
@@ -1941,6 +1948,7 @@ function setHost(id) {
 function updateRoster() {
   if (!botHost() || !versus() || state === 'menu' || now < net.rosterAt) return;
   net.rosterAt = now + 1;
+  if (oneLife() && state !== 'lobby' && !FLIGHT.on) return; // battle royale: the bots are set while the blimp flies, then never change
   const c = cfg(), hum = humansInMatch(), want = new Map();
   if (teamsOn()) { for (const t of [0, 1]) want.set(t, Math.max(0, c.ts - hum.filter(h => (h.team | 0) === t).length)); }
   else if (squadsOn()) { for (const t of botSquads(hum, c.sq, Math.max(0, Math.min(12 - hum.length, Math.max(c.bots, c.sq))))) want.set(t, (want.get(t) || 0) + 1); }
@@ -2094,9 +2102,10 @@ function stormText() {
   return now < storm.shrinkEnd ? 'closing!' : storm.r < 1 ? 'everywhere' : 'holding';
 }
 // who is still in: me, players who haven't gone down, and living bots
-function brAlive() {
-  return ents.filter(e => !e.zombie && (!e.remote || e.netbot || e.m === net.m) && (e.remote && !e.netbot ? !e.dead : e.alive));
-}
+// in this match: not someone else's old match, and not a player waiting back in the lobby
+const inMatch = e => !e.zombie && (!e.remote || e.netbot || (e.m === net.m && !e.lobby));
+const isAliveNow = e => (e.remote && !e.netbot ? !e.dead : e.alive);
+function brAlive() { return ents.filter(e => inMatch(e) && isAliveNow(e)); }
 
 // ---------- battle royale: the drop, loot chests, ammo and heals ----------
 // Seeded numbers, so every screen in a room flies the same route and finds the same loot in each chest.
@@ -3262,7 +3271,7 @@ function frame(t) {
 
 if (location.hostname === 'localhost') window.__spud = { player, net, ents, prog, Z, AIM, settings, tryFire, teamScore, storm,
   CH, FLIGHT, useKey, startHeal, get LIMIT() { return LIMIT; },
-  applyRemote: (id, s) => applyRemote(id, s), renderLobbyUI: () => renderLobbyUI(lobbyGroups()), enterLobby: () => enterLobby(),
+  applyRemote: (id, s, seat) => applyRemote(id, s, seat), renderLobbyUI: () => renderLobbyUI(lobbyGroups()), enterLobby: () => enterLobby(),
   camAt: (x, y, z, tx, ty, tz) => { camHold = true; camera.position.set(x, y, z); camera.lookAt(tx, ty, tz); }, boxes, STAIRS, PADS, SPAWNS, startGame, toMenu: () => toMenu(), get game() { return game; }, get state() { return state; }, get now() { return now; } };
 resize();
 dressVM(); updateProfile();

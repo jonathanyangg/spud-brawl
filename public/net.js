@@ -15,7 +15,7 @@ export function joinRoom(code, id, opts, { onPeer, onLeave, onStatus, onRoom, on
     ws.onmessage = ({ data }) => {
       if (dead) return;
       let m; try { m = JSON.parse(data); } catch (e) { return; }
-      if (m.t === 'p' && m.pr && typeof m.pr === 'object') onPeer(m.k, m.pr);
+      if (m.t === 'p' && m.pr && typeof m.pr === 'object') onPeer(m.k, m.pr, m.tm);
       else if (m.t === 'bye') onLeave(m.k);
       else if (m.t === 'room') onRoom(m); // what the room is playing: map, game, cfg, my team, and who the host is
       else if (m.t === 'host') onHost(m.k);

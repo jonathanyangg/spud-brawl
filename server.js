@@ -63,7 +63,7 @@ wss.on('connection', (ws, req) => {
   ws.send(roomMsg(room, ws));
 
   // catch the newcomer up on everyone already here
-  for (const [k, peer] of peers) if (k !== id && peer.last) ws.send(relay(k, peer.last));
+  for (const [k, peer] of peers) if (k !== id && peer.last) ws.send(relay(k, peer.last, peer.team));
 
   ws.alive = true;
   ws.on('pong', () => { ws.alive = true; });
@@ -87,7 +87,7 @@ wss.on('connection', (ws, req) => {
       return;
     }
     ws.last = raw;
-    const msg = relay(id, raw);
+    const msg = relay(id, raw, ws.team);
     for (const [k, peer] of peers) if (k !== id && peer.readyState === 1) peer.send(msg);
   });
   ws.on('close', () => {
@@ -130,7 +130,8 @@ function pickTeam(room, seated = [...room.peers.values()]) {
   if (room.cfg.side === 'together') return n[0] < room.cfg.ts ? 0 : n[1] < room.cfg.ts ? 1 : n[0] <= n[1] ? 0 : 1;
   return n[0] <= n[1] ? 0 : 1;
 }
-const relay = (k, raw) => `{"t":"p","k":"${k}","pr":${raw}}`;
+// tm: the seat the server gave them, so a squad never depends on what their own game says
+const relay = (k, raw, tm) => `{"t":"p","k":"${k}","tm":${Number.isInteger(tm) ? tm : -1},"pr":${raw}}`;
 
 // drop sockets that stopped answering (closed laptop, lost wifi)
 setInterval(() => {
