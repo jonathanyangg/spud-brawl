@@ -2,9 +2,10 @@
 // (position, aim, score, recent events); the server forwards it to everyone else in the room.
 // Reconnects on its own if the link drops.
 // opts: what a new room is set up with ({ map, game, bots, diff, ts, lim, side, pub }); joining an existing room ignores them
-export function joinRoom(code, id, opts, { onPeer, onLeave, onStatus, onRoom, onHost }) {
+// id is public (everyone in the room sees it); key is secret and only goes to the server, which needs it to give a seat back
+export function joinRoom(code, id, key, opts, { onPeer, onLeave, onStatus, onRoom, onHost }) {
   let ws = null, mine = null, dead = false, retryT = null, tries = 0;
-  const q = new URLSearchParams({ room: code, id, ...opts });
+  const q = new URLSearchParams({ room: code, id, key, ...opts });
   const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?${q}`;
 
   function connect() {
@@ -19,7 +20,7 @@ export function joinRoom(code, id, opts, { onPeer, onLeave, onStatus, onRoom, on
       else if (m.t === 'bye') onLeave(m.k);
       else if (m.t === 'room') onRoom(m); // what the room is playing: map, game, cfg, my team, and who the host is
       else if (m.t === 'host') onHost(m.k);
-      else if (m.t === 'full' || m.t === 'busy') { dead = true; onStatus(m.t); } // busy: a battle royale is under way
+      else if (m.t === 'full' || m.t === 'busy' || m.t === 'taken') { dead = true; onStatus(m.t); } // busy: a battle royale is under way; taken: our id, someone else's key
     };
     ws.onclose = () => {
       if (dead) return;

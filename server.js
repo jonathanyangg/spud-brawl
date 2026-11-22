@@ -42,8 +42,11 @@ const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024 });
 wss.on('connection', (ws, req) => {
   const q = new URL(req.url, 'http://x').searchParams;
   const code = String(q.get('room') || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 20) || 'brawl';
-  const id = q.get('id');
+  const id = q.get('id'), key = q.get('key');
   if (!/^[a-z0-9]{4,16}$/.test(id || '')) { ws.close(1008, 'bad id'); return; }
+  // key: the player's secret, never relayed. Ids are public (every presence carries one), so only the matching key
+  // can take a seat back, which stops anyone from kicking a player off their seat or playing as them (or as the leader)
+  if (!/^[A-Za-z0-9_-]{16,64}$/.test(key || '')) { ws.close(1008, 'bad key'); return; }
 
   // whoever opens a room picks its map and game type; everyone who joins later plays those
   let room = rooms.get(code);
@@ -55,14 +58,17 @@ wss.on('connection', (ws, req) => {
       lim: int(q.get('lim'), 5, 100, 25), side: q.get('side') === 'split' ? 'split' : 'together', sq: int(q.get('sq'), 1, 4, 1), hok: [0, 25, 50].includes(+q.get('hok')) ? +q.get('hok') : 0 }, // sq: battle royale squad size; hok: health back per kill
     pub: q.get('pub') === '1', peers: new Map(),
     locked: false, inMatch: new Set(), seats: new Map(), // locked: a battle royale is on; inMatch: who was here when it started; seats: their squads
+    keys: new Map(), // player id -> their secret key, for everyone seated (and, while locked, everyone in the match)
   });
-  const peers = room.peers, old = peers.get(id);
+  const peers = room.peers, known = room.keys.get(id);
+  if (known !== undefined && known !== key) { ws.send('{"t":"taken"}'); ws.close(); return; } // their id, not their key
+  const old = peers.get(id);
   // during a locked match only the players who were in it get back in (a dropped connection, a reload)
   if (room.locked && !old && !room.inMatch.has(id)) { ws.send('{"t":"busy"}'); ws.close(); return; }
   if (old) { ws.team = old.team; old.terminate(); } // same player reconnecting: drop the stale socket, keep the seat
   else if (peers.size >= MAX_PLAYERS) { ws.send('{"t":"full"}'); ws.close(); return; }
   else ws.team = room.locked && room.seats.has(id) ? room.seats.get(id) : pickTeam(room);
-  peers.set(id, ws);
+  peers.set(id, ws); room.keys.set(id, key);
   ws.send(roomMsg(room, ws));
 
   // catch the newcomer up on everyone already here
@@ -81,6 +87,7 @@ wss.on('connection', (ws, req) => {
         room.locked = o.on === true;
         room.inMatch = new Set(room.locked ? peers.keys() : []);
         room.seats = new Map(room.locked ? [...peers].map(([k, v]) => [k, v.team]) : []);
+        if (!room.locked) for (const k of [...room.keys.keys()]) if (!peers.has(k)) room.keys.delete(k); // match over: forget who left
       } else if (o.t === 'set') {
         setRoom(room, o);
         const seated = []; for (const peer of peers.values()) { peer.team = pickTeam(room, seated); seated.push(peer); } // seat everyone again
@@ -101,6 +108,7 @@ wss.on('connection', (ws, req) => {
     if (peers.get(id) !== ws) return; // replaced by a reconnect
     const wasHost = peers.keys().next().value === id;
     peers.delete(id);
+    if (!(room.locked && room.inMatch.has(id))) room.keys.delete(id); // a player from a locked match keeps their key to come back
     if (!peers.size) { rooms.delete(code); return; }
     const bye = JSON.stringify({ t: 'bye', k: id }), host = JSON.stringify({ t: 'host', k: peers.keys().next().value });
     for (const peer of peers.values()) if (peer.readyState === 1) { peer.send(bye); if (wasHost) peer.send(host); }

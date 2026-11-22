@@ -187,8 +187,10 @@ process.on('exit', () => { for (const c of servers) c.kill(); });
 const PORT = 3999, base = `ws://localhost:${PORT}/ws`;
 await startServer(PORT);
 
-const open = (room, id, map = '', game = '') => new Promise((res, rej) => {
-  const ws = new WebSocket(`${base}?room=${room}&id=${id}&map=${map}&game=${game}`); ws.msgs = [];
+// key: each test player's secret; the default is the same for every connect of an id, so reconnects match
+const keyOf = id => `${id}-secret-key-0000`;
+const open = (room, id, map = '', game = '', key = keyOf(id)) => new Promise((res, rej) => {
+  const ws = new WebSocket(`${base}?room=${room}&id=${id}&key=${key}&map=${map}&game=${game}`); ws.msgs = [];
   ws.on('message', d => { const m = JSON.parse(d); if (m.t === 'room') { ws.map = m.map; ws.game = m.game; } else ws.msgs.push(m); });
   ws.on('open', () => res(ws)); ws.on('error', rej);
 });
@@ -244,9 +246,32 @@ const tick = () => new Promise(r => setTimeout(r, 100));
   for (const s of [lead, back, after, late]) s.close();
   console.log('room lock ok');
 }
+
+// ---------- a public id is not enough to take someone's seat ----------
+{
+  const host = await open('keyroom', 'host1', 'yard', 'ffa');
+  const guest = await open('keyroom', 'gues2'); await tick();
+  host.send(JSON.stringify({ v: 1, n: 'Host' })); await tick();
+  assert.ok(!JSON.stringify(guest.msgs).includes(keyOf('host1')), 'the key is never relayed');
+  const fake = await open('keyroom', 'host1', '', '', 'someone-elses-key-9999'); await tick();
+  assert.ok(fake.msgs.some(m => m.t === 'taken'), 'wrong key: turned away');
+  assert.equal(host.readyState, 1, 'and the real player keeps their seat');
+  assert.ok(!guest.msgs.some(m => m.t === 'bye' || m.t === 'host'), 'nobody saw them leave or the lead change');
+  const hostBack = await open('keyroom', 'host1'); await tick();
+  assert.ok(!hostBack.msgs.some(m => m.t === 'taken'), 'the right key reconnects');
+  assert.ok(host.readyState >= 2, 'the old socket was dropped for the new one');
+  const noKey = new WebSocket(`${base}?room=keyroom&id=nokey9`);
+  const code = await new Promise(r => noKey.on('close', c => r(c)));
+  assert.equal(code, 1008, 'no key: refused');
+  hostBack.close(); await tick();
+  const reuse = await open('keyroom', 'host1', '', '', 'a-new-key-after-leaving'); await tick();
+  assert.ok(!reuse.msgs.some(m => m.t === 'taken'), 'once a player leaves an unlocked room their id is free again');
+  for (const s of [guest, reuse]) s.close();
+  console.log('seat keys ok');
+}
 {
   // /rooms reports a locked room as in progress (it has to be public to be listed)
-  const pubOpen = id => new Promise((res, rej) => { const ws = new WebSocket(`${base}?room=pubbr&id=${id}&game=br&pub=1`); ws.msgs = []; ws.on('message', d => ws.msgs.push(JSON.parse(d))); ws.on('open', () => res(ws)); ws.on('error', rej); });
+  const pubOpen = id => new Promise((res, rej) => { const ws = new WebSocket(`${base}?room=pubbr&id=${id}&key=${keyOf(id)}&game=br&pub=1`); ws.msgs = []; ws.on('message', d => ws.msgs.push(JSON.parse(d))); ws.on('open', () => res(ws)); ws.on('error', rej); });
   const lead = await pubOpen('plead1'); await tick();
   const list = async () => (await (await fetch(`http://localhost:${PORT}/rooms`)).json()).find(r => r.code === 'pubbr');
   assert.equal((await list()).busy, false, 'listed as open');

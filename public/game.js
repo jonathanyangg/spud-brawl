@@ -1699,7 +1699,9 @@ function loadoutChanged() {
 // cfg: the room's settings; host: who runs the bots (the server says: whoever has been in the room longest);
 // bots: the host's bots as I see them (others' screens); tscore: the host's team scores
 const net = { room: null, status: '', myPeer: Math.random().toString(36).slice(2, 12), seq: 0, ev: [], lastSeq: new Map(), remotes: new Map(), m: 1, sendAt: 0,
-  cfg: null, host: null, bots: new Map(), tscore: null, rosterAt: 0, ready: true };
+  cfg: null, host: null, bots: new Map(), tscore: null, rosterAt: 0, ready: true,
+  // key: secret, only ever sent to the server; it proves a reconnect is really us (myPeer is public: every presence carries it)
+  key: Array.from(crypto.getRandomValues(new Uint8Array(24)), b => 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_'[b & 63]).join('') };
 const botHost = () => mode === 'online' && net.host === net.myPeer;
 // the leader locks the room while a battle royale is on (newcomers are turned away) and unlocks it after
 const sendLock = on => { if (mode === 'online' && net.room && net.host === net.myPeer) net.room.control({ t: 'lock', on }); };
@@ -1732,7 +1734,7 @@ function netSend(force) {
 }
 function startOnline(code) {
   const opts = { map: settings.map, game, bots: settings.bots, diff: settings.diff, ts: settings.ts, lim: settings.lim, side: settings.side, sq: settings.sq, hok: settings.hok, pub: settings.pub ? 1 : 0 };
-  net.room = joinRoom(code, net.myPeer, opts, {
+  net.room = joinRoom(code, net.myPeer, net.key, opts, {
     onPeer: applyRemote,
     onHost: setHost,
     onRoom: ({ map, game: g, cfg: c, team, host, pub }) => {
@@ -1753,6 +1755,7 @@ function startOnline(code) {
     onStatus: s => {
       net.status = s; updateNetStatus();
       if (s === 'busy') { toMenu(); toast('That room has a match in progress. Try again when it ends.'); }
+      if (s === 'taken') { toMenu(); toast('Someone in that room is already using your player id. Reload and try again.'); }
     },
   });
   netSend(true);
