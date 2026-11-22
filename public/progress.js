@@ -124,6 +124,28 @@ export function setOwned(p, owned) {
 // Cloud save merge: keep the save with more XP; a tie keeps a (the newer edit, e.g. an Armory change).
 export const mergeProgress = (a, b) => (b.xp > a.xp ? b : a);
 
+// The cloud can't trust a save's XP (the game runs on the player's machine), so it limits how fast it can grow:
+// a bucket that fills at perMin XP a minute of real time, up to max (a first sync gets a full bucket).
+// Kill, match and win counts can't outrun the XP that got in either (a kill is worth at least XP.kill).
+export const SYNC_XP = { perMin: 600, max: 30000 };
+// mine, cloud: cleaned saves (cloud null on a first sync); at: when the cloud's bucket was last drawn on (ms, or none);
+// owned: the account's shop items. Returns { save, capped, at }: save is mine itself when nothing had to change.
+export function capGain(mine, cloud, at, now, owned) {
+  const base = cloud || newProgress();
+  const budget = Number.isFinite(at) && at <= now ? Math.min(SYNC_XP.max, (SYNC_XP.perMin * (now - at)) / 60000) : SYNC_XP.max;
+  const gain = Math.max(0, mine.xp - base.xp), xpIn = Math.min(gain, Math.floor(budget));
+  const sum = a => a.reduce((t, v) => t + v, 0);
+  const killsUp = sum(mine.wk) - sum(base.wk) > xpIn / XP.kill;
+  const matchesUp = mine.matches - base.matches > xpIn / XP.match, winsUp = mine.wins - base.wins > xpIn / XP.win;
+  const next = now - ((budget - xpIn) * 60000) / SYNC_XP.perMin; // what's left in the bucket stays for next time
+  if (xpIn === gain && !killsUp && !matchesUp && !winsUp) return { save: mine, capped: false, at: next };
+  const o = { ...mine, xp: base.xp + xpIn };
+  if (killsUp) { o.wk = base.wk; o.wh = base.wh; }
+  if (matchesUp) o.matches = base.matches + Math.floor(xpIn / XP.match);
+  if (winsUp) o.wins = base.wins + Math.floor(xpIn / XP.win);
+  return { save: loadProgress(JSON.stringify(o), owned), capped: true, at: next }; // unlocks checked again at the lower numbers
+}
+
 function unlockLabels(p) {
   const out = new Map();
   for (const [u] of UNIFORMS) if (uniformUnlocked(p, u)) out.set('u' + u, `${LOOKS[u].name} uniform`);

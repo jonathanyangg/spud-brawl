@@ -3,7 +3,7 @@
 // decided here, and every write uses the service-role key through atomic Postgres functions (supabase/schema.sql).
 // With no env vars set, /api/config says so and every other route answers 503; the game runs as before.
 import { randomInt } from 'node:crypto';
-import { loadProgress, mergeProgress } from './public/progress.js';
+import { loadProgress, mergeProgress, capGain } from './public/progress.js';
 import { pickSpin, spinState, SPIN_COOLDOWN_MS, COIN_PACKS, packById, buyCheck } from './public/economy.js';
 
 const env = process.env;
@@ -70,7 +70,8 @@ async function profile(uid) {
 const spinInfo = lastSpin => { const s = spinState(lastSpin, Date.now()); return { spinReady: s.ready, nextSpin: s.next }; };
 // stored progress, cleaned with the same rules the client uses; owned always comes from the profile, never the save
 const cleanSave = (progress, owned) => loadProgress(JSON.stringify(progress ?? null), owned);
-const forStorage = ({ owned, ...save }) => save;
+// at: when the XP bucket was last drawn on (see capGain); kept with the save, never sent back
+const forStorage = ({ owned, ...save }, at) => ({ ...save, at });
 
 // ---------- routes ----------
 const routes = {
@@ -78,13 +79,15 @@ const routes = {
     const p = await profile(user.id);
     return { email: user.email, coins: p.coins, owned: p.owned, ...spinInfo(p.last_spin), progress: p.progress ? cleanSave(p.progress, p.owned) : null };
   },
-  // cloud save, both ways: send yours, get back whichever has more XP (and the cloud keeps that one)
+  // cloud save, both ways: send yours, get back whichever has more XP (and the cloud keeps that one).
+  // XP comes from the player's game, so it can only climb so fast (capGain); kept: 'capped' when yours got trimmed
   'POST /api/progress': async (req, user) => {
     const body = await readJson(req), p = await profile(user.id);
     const mine = cleanSave(body.progress, p.owned), cloud = p.progress ? cleanSave(p.progress, p.owned) : null;
-    const keep = cloud ? mergeProgress(mine, cloud) : mine;
-    if (keep === mine) await sb(`/rest/v1/profiles?id=eq.${user.id}`, { method: 'PATCH', body: { progress: forStorage(mine) }, prefer: 'return=minimal' });
-    return { progress: keep, kept: keep === mine ? 'yours' : 'cloud' };
+    if (cloud && mergeProgress(mine, cloud) === cloud) return { progress: cloud, kept: 'cloud' };
+    const { save, capped, at } = capGain(mine, cloud, p.progress?.at, Date.now(), p.owned);
+    await sb(`/rest/v1/profiles?id=eq.${user.id}`, { method: 'PATCH', body: { progress: forStorage(save, Math.round(at)) }, prefer: 'return=minimal' });
+    return { progress: save, kept: capped ? 'capped' : 'yours' };
   },
   'POST /api/spin': async (req, user) => {
     const p = await profile(user.id), st = spinInfo(p.last_spin);

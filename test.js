@@ -117,6 +117,27 @@ import { WEAPONS } from './public/config.js';
   // cloud save merge: more XP wins, ties keep the first (the incoming edit)
   const lo2 = { xp: 5 }, hi2 = { xp: 9 }, tie = { xp: 9 };
   assert.equal(P.mergeProgress(lo2, hi2), hi2); assert.equal(P.mergeProgress(hi2, lo2), hi2); assert.equal(P.mergeProgress(tie, hi2), tie);
+
+  // cloud XP cap: a bucket of SYNC_XP.perMin a minute, up to SYNC_XP.max
+  const MIN = 60000, T = 1e12, { perMin, max } = P.SYNC_XP;
+  const saveOf = (xp, kills = 0, extra = {}) => { const s = P.newProgress(); s.xp = xp; s.wk[0] = kills; return Object.assign(s, extra); };
+  let cg = P.capGain(saveOf(1000, 5), null, undefined, T);
+  assert.equal(cg.capped, false, 'a normal first sync goes through'); assert.equal(cg.save.xp, 1000);
+  cg = P.capGain(saveOf(10_000_000, 99999), null, undefined, T);
+  assert.equal(cg.capped, true); assert.equal(cg.save.xp, max, 'a first sync gets one full bucket'); assert.equal(cg.save.wk[0], 0, 'kills past what the XP allows are not taken');
+  assert.equal(cg.at, T, 'and the bucket is empty after');
+  cg = P.capGain(saveOf(max + 10 * perMin), saveOf(max), T, T + 10 * MIN);
+  assert.equal(cg.capped, false, 'ten minutes of play at the cap rate gets in'); assert.equal(cg.at, T + 10 * MIN);
+  cg = P.capGain(saveOf(max + 20 * perMin), saveOf(max), T, T + 10 * MIN);
+  assert.equal(cg.save.xp, max + 10 * perMin, 'faster than that is trimmed');
+  cg = P.capGain(saveOf(1100), saveOf(1000), T - 60 * MIN, T);
+  assert.equal(cg.capped, false); assert.ok(Math.abs(cg.at - (T - (max - 100) / perMin * MIN)) < 1, 'unused XP stays in the bucket (up to max)');
+  cg = P.capGain(saveOf(5000, 0, { wins: 50, matches: 50 }), saveOf(4000), T - 60 * MIN, T);
+  assert.equal(cg.save.xp, 5000); assert.equal(cg.save.wins, 2, '1000 XP is two wins at most'); assert.equal(cg.save.matches, 5);
+  const camoCheat = saveOf(1000, 300); camoCheat.camo[0] = 'gold'; camoCheat.wh[0] = 300;
+  cg = P.capGain(camoCheat, saveOf(900), T - 60 * MIN, T);
+  assert.equal(cg.save.wk[0], 0); assert.equal(cg.save.camo[0], 'factory', 'unlocks from trimmed kills come off');
+  assert.equal(P.capGain(saveOf(900), saveOf(900), T, T + 1).capped, false, 'no gain: an Armory edit goes through');
   console.log('progress ok');
 }
 
@@ -391,6 +412,10 @@ const AP = 3995; await startServer(AP, MOCK_ENV);
   assert.equal(r.json.kept, 'cloud', 'junk sanitizes to a fresh save, which loses');
   assert.equal((await call(AP, 'POST', '/api/progress', { token: 'tok-a', body: 'not json{' })).status, 400);
   assert.equal((await call(AP, 'GET', '/api/me', { token: 'tok-a' })).json.progress.xp, 1000);
+  assert.ok(Number.isFinite(db.get(UA).progress.at), 'the bucket time is stored with the save');
+  r = await call(AP, 'POST', '/api/progress', { token: 'tok-a', body: { progress: { xp: 10_000_000 } } });
+  assert.equal(r.json.kept, 'capped', 'a huge jump is trimmed'); assert.ok(db.get(UA).progress.xp < 1000 + P.SYNC_XP.max);
+  assert.ok(!('at' in r.json.progress) && !('at' in (await call(AP, 'GET', '/api/me', { token: 'tok-a' })).json.progress), 'at is never sent back');
 
   // daily spin: server picks, once per 24h, and two clicks at once only pay once
   r = await call(AP, 'POST', '/api/spin', { token: 'tok-a' });
@@ -418,7 +443,7 @@ const AP = 3995; await startServer(AP, MOCK_ENV);
   const buys = await Promise.all(['hazard', 'carbon'].map(item => call(AP, 'POST', '/api/buy', { token: 'tok-a', body: { item } })));
   assert.equal(buys.filter(x => x.status === 200).length, 1, '900 coins buys 600 or 700, not both'); assert.ok(db.get(UA).coins >= 0);
   // a bought camo survives the cloud save; another user's purchases are theirs alone
-  const camoSave = P.newProgress(); camoSave.xp = 2000; camoSave.camo[0] = 'cherry';
+  const camoSave = P.newProgress(); camoSave.xp = db.get(UA).progress.xp; camoSave.camo[0] = 'cherry'; // a tie: an Armory edit
   assert.equal((await call(AP, 'POST', '/api/progress', { token: 'tok-a', body: { progress: camoSave } })).json.progress.camo[0], 'cherry');
   assert.equal((await call(AP, 'POST', '/api/progress', { token: 'tok-b', body: { progress: camoSave } })).json.progress.camo[0], 'factory');
 

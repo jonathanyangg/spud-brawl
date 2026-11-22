@@ -93,7 +93,9 @@ async function loadMe() {
   if (!synced) {
     // first sync this page load: the save with more XP wins, on both sides
     const r = await api('/api/progress', { progress: prog });
-    Object.assign(prog, P.loadProgress(JSON.stringify(r.progress), me.owned));
+    // capped: the cloud took only part of this device's XP; keep playing from ours, the cloud catches up over time
+    if (r.kept === 'capped') P.setOwned(prog, me.owned);
+    else Object.assign(prog, P.loadProgress(JSON.stringify(r.progress), me.owned));
     synced = true;
     if (r.kept === 'cloud') say('Loaded your cloud save.');
   } else P.setOwned(prog, me.owned);
