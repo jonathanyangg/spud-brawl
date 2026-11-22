@@ -65,6 +65,7 @@ cdnjs; where that host is blocked, point `THREE_JS` at a local r128 `three.min.j
 - `public/bots.js`: bot brains, the roster, and the host's bots on everyone else's screen
 - `public/netsync.js`: online play (the presence each game streams, other players' events, who hosts the room)
 - `public/hud.js`: the HUD, kill feed and scoreboard, XP banners, the battle royale minimap
+- `public/ping.js`: pings (Z marks a spot or enemy for your squad or team; click the full map to ping there, dead or alive)
 - `public/util.js`: small shared helpers
 - `public/net.js`: WebSocket client, auto-reconnects
 - `public/world.js`: the list of maps and loading one

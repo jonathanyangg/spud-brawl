@@ -20,6 +20,7 @@ import {
   MM, addFeed, awardKill, buildTable, clearBanners, fillLevelBar, fx, gainXP, hitMarker, loadoutChanged, resetRun, run, scoresChanged, setText,
   toast, toggleBigMap, updateHUD, updateProfile, updateScoreTop
 } from './hud.js';
+import { moveMapCursor, pingAim, pingMap, updatePings } from './ping.js';
 
 const UP = new V3(0, 1, 0);
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -911,6 +912,7 @@ function relockAfterDeath() {
   setTimeout(() => { if (!locked && state === 'playing' && player.alive) toast('Click to keep playing'); }, 400);
 }
 document.addEventListener('mousemove', e => {
+  if (state === 'playing' && MM.big && locked) { moveMapCursor(e.movementX, e.movementY); return; } // the full map's cursor, not the view
   if (state !== 'playing' || !player.alive) return;
   if (locked || (plWorks === false && e.buttons)) {
     const s = settings.sens * 0.0022 * (zoomed ? camera.fov / settings.fov * settings.adsSens : 1) * (now < player.stunUntil ? 0.4 : 1);
@@ -922,6 +924,7 @@ canvas.addEventListener('mousedown', e => {
   if (state !== 'playing') return;
   initAudio();
   if (invOpen) { closeInv(); return; }
+  if (MM.big && locked && e.button === 0) { pingMap(); return; } // a click on the full map pings there
   if (!player.alive && mode !== 'online') return;
   if (!locked && plWorks !== false) { requestLock(); return; }
   pressCode('Mouse' + e.button);
@@ -934,7 +937,8 @@ function pressCode(code) {
   const a = actionFor(code);
   if (a === 'shoot') { fireLatch = true; triggerUsed = false; }
   if (a === 'scores') { buildTable($('boardTbl')); $('board').hidden = false; }
-  if (a === 'map') { toggleBigMap(); return; } // works dead too, while you spectate
+  if (a === 'map') { toggleBigMap(); return; } // these two work dead too, while you spectate
+  if (a === 'ping') { if (MM.big) pingMap(); else pingAim(); return; }
   if (!player.alive || !a) return;
   if (player.drop) { if (a === 'jump') dropPress(player); return; }
   if (a === 'w1') switchWeapon(player, slotIdx(player, 0));
@@ -1008,7 +1012,7 @@ function renderKeyHelp() {
     `${kb(binds.w1)}${kb(binds.w2)}${kb(binds.w3)}${kb(binds.w4)} ${kb(binds.swap)} Switch weapon`,
     `${kb(binds.use)} Open chest \u00b7 pick up &nbsp;${kb(binds.dropGun)} Drop weapon &nbsp;${kb(binds.bandage)} Bandage &nbsp;${kb(binds.medkit)} Medkit &nbsp;${kb(binds.slotL)}${kb(binds.slotR)} Reorder guns &nbsp;${kb(binds.inv)} Inventory (battle royale)`,
     `${kb(binds.reload)} Reload`, `${kb(binds.nade)} Throw equipment`,
-    `${kb(binds.map)} Full map &nbsp;${kb(binds.scores)} Scores &nbsp;${kb(binds.mute)} Mute`,
+    `${kb(binds.map)} Full map &nbsp;${kb(binds.ping)} Ping (click the full map to ping there) &nbsp;${kb(binds.scores)} Scores &nbsp;${kb(binds.mute)} Mute`,
   ].map(s => `<div>${s}</div>`).join('');
 }
 function startRebind(k) {
@@ -2519,6 +2523,7 @@ function frame(t) {
     if (flashMesh.visible) { flashMesh.position.copy(curVM().userData.muzzle); flashMesh.rotation.set(rand(0, 3), rand(0, 3), rand(0, 3)); flashMesh.scale.setScalar(curW().id === 0 || curW().id === 3 ? 1 : 1.8); }
   }
   if (state !== 'menu' && state !== 'lobby') updateHUD(dt);
+  updatePings();
   if (state === 'lobby') updateLobby(dt);
   updateInv();
   if (mode === 'online') netSend(false);

@@ -39,6 +39,8 @@ export function sfxShot(wi, v) {
 }
 export const sfx = {
   hit: () => tone(1250, 0.05, 0.16, 'square', 900),
+  ping: () => { tone(1320, 0.07, 0.12, 'sine', 1560); setTimeout(() => tone(1760, 0.1, 0.1, 'sine'), 70); },
+  pingEnemy: () => { tone(980, 0.06, 0.14, 'square', 1200); setTimeout(() => tone(980, 0.06, 0.14, 'square', 1200), 110); },
   head: () => { tone(1700, 0.06, 0.18, 'square', 1300); },
   kill: () => { tone(660, 0.09, 0.2, 'triangle'); setTimeout(() => tone(990, 0.16, 0.2, 'triangle'), 80); },
   hurt: () => tone(160, 0.12, 0.25, 'sawtooth', 80),

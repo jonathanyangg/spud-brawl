@@ -14,6 +14,7 @@ import {
 } from './game.js';
 import { botState, byId, humansInMatch, makeBot, myBot, removeNetBot, syncBots } from './bots.js';
 import { addFeed, awardKill, scoresChanged, toast, updateScoreTop } from './hud.js';
+import { remotePing } from './ping.js';
 
 // ---------- online play ----------
 // Every player streams a presence (position, aim, score, a ring of recent events) through the relay.
@@ -187,6 +188,8 @@ function handleNetEvent(r, e) {
   } else if (type === 'dp' && oneLife()) {
     const pl = LIMIT * 1.5;
     spillItems(r.peer + ':' + num(e[0]), decItems(e.slice(5).map(num)), clamp(num(e[2]), -pl, pl), clamp(num(e[3]), 0, 120), clamp(num(e[4]), -pl, pl));
+  } else if (type === 'pg') {
+    remotePing(r, e); // a squadmate's or teammate's ping
   } else if (type === 'zx') {
     // the zombie host says I got a zombie kill
     if (e[2] === net.myPeer && state === 'playing') { player.kills++; sfx.kill(); awardKill(wname(e[3]), e[4] === 1); updateScoreTop(); }

@@ -66,7 +66,7 @@ export const ACTIONS = [
   ['jump', 'Jump', 'Space'], ['sprint', 'Sprint', 'ShiftLeft'], ['crouch', 'Crouch / slide', 'KeyC'],
   ['shoot', 'Shoot', 'Mouse0'], ['scope', 'Aim down sights', 'Mouse2'],
   ['w1', 'Weapon 1', 'Digit1'], ['w2', 'Weapon 2', 'Digit2'], ['w3', 'Weapon 3', 'Digit3'], ['w4', 'Weapon 4', 'Digit4'], ['swap', 'Last weapon', 'KeyQ'], ['slotL', 'Move gun left in loadout', 'BracketLeft'], ['slotR', 'Move gun right in loadout', 'BracketRight'],
-  ['reload', 'Reload', 'KeyR'], ['use', 'Open chest / pick up', 'KeyE'], ['dropGun', 'Drop weapon (battle royale)', 'KeyX'], ['bandage', 'Use bandage', 'KeyB'], ['medkit', 'Use medkit', 'KeyN'], ['inv', 'Inventory (battle royale)', 'Tab'], ['map', 'Full map (battle royale)', 'KeyM'], ['nade', 'Throw equipment', 'KeyG'], ['scores', 'Show scores', 'KeyL'], ['mute', 'Mute sound', 'KeyK'],
+  ['reload', 'Reload', 'KeyR'], ['use', 'Open chest / pick up', 'KeyE'], ['dropGun', 'Drop weapon (battle royale)', 'KeyX'], ['bandage', 'Use bandage', 'KeyB'], ['medkit', 'Use medkit', 'KeyN'], ['inv', 'Inventory (battle royale)', 'Tab'], ['map', 'Full map (battle royale)', 'KeyM'], ['ping', 'Ping a spot or enemy', 'KeyZ'], ['nade', 'Throw equipment', 'KeyG'], ['scores', 'Show scores', 'KeyL'], ['mute', 'Mute sound', 'KeyK'],
 ];
 export const DEFAULT_BINDS = Object.fromEntries(ACTIONS.map(a => [a[0], a[2]]));
 const BLOCKED_KEYS = ['Escape', 'MetaLeft', 'MetaRight', 'OSLeft', 'OSRight', 'ContextMenu', 'F5', 'F11', 'F12'];

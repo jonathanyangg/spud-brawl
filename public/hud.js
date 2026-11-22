@@ -10,6 +10,7 @@ import {
   spec, squadmates, squadsOn, state, storm, stormText, teamScore, teamsOn, zLeft, zoomed
 } from './game.js';
 import { net } from './netsync.js';
+import { clearPings, drawPings, mapCursorHome } from './ping.js';
 
 // ---------- HUD ----------
 const txtCache = new Map();
@@ -143,7 +144,7 @@ export function updateHUD(dt) {
 
 // ---------- XP and unlocks ----------
 export const run = { xp: 0, unlocks: [], startLv: 1 }; // this match, for the Match over screen
-export function resetRun() { run.xp = 0; run.unlocks = []; run.startLv = P.level(prog); }
+export function resetRun() { clearPings(); run.xp = 0; run.unlocks = []; run.startLv = P.level(prog); }
 export function gainXP(xp, opts) {
   const r = P.award(prog, xp, opts);
   run.xp += xp; run.unlocks.push(...r.unlocks);
@@ -215,6 +216,7 @@ export function toggleBigMap(on = !MM.big) {
   on = on && oneLife() && state === 'playing';
   if (on === MM.big) return;
   MM.big = on; MM.S = on ? 900 : 360; MM.base = null; MM.at = 0;
+  if (on) mapCursorHome(); else MM.cur = null;
   const el = $('minimap'); el.width = el.height = MM.S; el.classList.toggle('big', on);
 }
 function mmBase() {
@@ -249,6 +251,7 @@ function drawMinimap() {
     g.fillStyle = 'rgba(150,60,220,.45)'; g.beginPath(); g.rect(0, 0, S, S); g.arc(X(storm.x), X(storm.z), Math.max(0, storm.r * k), 0, Math.PI * 2, true); g.fill('evenodd');
     g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 2 * u; g.beginPath(); g.arc(X(storm.tx), X(storm.tz), Math.max(0, storm.tr * k), 0, Math.PI * 2); g.stroke();
   }
+  drawPings(g, X, u);
   for (const e of squadmates()) { // your squad
     g.fillStyle = e === spec.who ? '#fff6e0' : '#5fd068'; g.strokeStyle = '#1b1208'; g.lineWidth = 2 * u;
     g.beginPath(); g.arc(X(e.pos.x), X(e.pos.z), 5 * u, 0, Math.PI * 2); g.fill(); g.stroke();
