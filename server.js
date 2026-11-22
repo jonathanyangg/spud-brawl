@@ -11,6 +11,10 @@ import { handleApi } from './api.js';
 const PORT = process.env.PORT || 3000;
 const PUBLIC = fileURLToPath(new URL('./public/', import.meta.url));
 const MAX_PLAYERS = 12;
+// flood limits: rooms on the server, sockets from one address, and each socket's messages and bytes a second
+// (a game sends about 30 presences a second; the bot host's are the biggest). Over the rate: dropped; far over: closed.
+const MAX_ROOMS = +process.env.MAX_ROOMS || 300, PER_IP = +process.env.MAX_PER_IP || 16;
+const MSG_RATE = 60, MSG_BURST = 120, BYTE_RATE = 512 * 1024, STRIKES = 200;
 const MAPS = ['depot', 'yard', 'dunes', 'frost', 'stack', 'highrise', 'island'];
 const GAMES = ['ffa', 'tdm', 'br', 'zombies', 'gungame', 'moon', 'snipe']; // aim trainer is solo, never a room
 const DIFFS = ['easy', 'normal', 'hard'];
@@ -37,6 +41,9 @@ const server = createServer(async (req, res) => {
 // room code -> { map, game, cfg, pub, peers: Map(player id -> socket) }. Peers keep join order, so the first one is the
 // host: the player whose game runs the bots (and hands them on when they leave).
 const rooms = new Map();
+const perIp = new Map(); // address -> open sockets
+// behind a host's proxy every socket comes from the proxy, so use the address it saw (the last x-forwarded-for entry)
+const addrOf = req => String(req.headers['x-forwarded-for'] || '').split(',').pop().trim() || req.socket.remoteAddress || '?';
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024 });
 
 wss.on('connection', (ws, req) => {
@@ -47,9 +54,14 @@ wss.on('connection', (ws, req) => {
   // key: the player's secret, never relayed. Ids are public (every presence carries one), so only the matching key
   // can take a seat back, which stops anyone from kicking a player off their seat or playing as them (or as the leader)
   if (!/^[A-Za-z0-9_-]{16,64}$/.test(key || '')) { ws.close(1008, 'bad key'); return; }
+  const ip = addrOf(req);
+  if ((perIp.get(ip) || 0) >= PER_IP) { ws.close(1008, 'too many connections'); return; }
+  perIp.set(ip, (perIp.get(ip) || 0) + 1);
+  ws.once('close', () => { const n = perIp.get(ip) - 1; if (n > 0) perIp.set(ip, n); else perIp.delete(ip); });
 
   // whoever opens a room picks its map and game type; everyone who joins later plays those
   let room = rooms.get(code);
+  if (!room && rooms.size >= MAX_ROOMS) { ws.send('{"t":"full"}'); ws.close(); return; } // the server is full, not just this room
   // and its settings: bots (free-for-all count), bot skill, team size and score limit (team deathmatch), and whether
   // the players go on one team against bots or get split evenly; pub: listed in the server browser
   if (!room) rooms.set(code, room = {
@@ -76,7 +88,14 @@ wss.on('connection', (ws, req) => {
 
   ws.alive = true;
   ws.on('pong', () => { ws.alive = true; });
+  // token buckets: MSG_RATE messages and BYTE_RATE bytes a second, with some burst; every dropped message is a strike
+  let msgs = MSG_BURST, bytes = BYTE_RATE, strikes = 0, at = Date.now();
   ws.on('message', (data, isBinary) => {
+    const now = Date.now(), dt = (now - at) / 1000; at = now;
+    msgs = Math.min(MSG_BURST, msgs + dt * MSG_RATE); bytes = Math.min(BYTE_RATE, bytes + dt * BYTE_RATE);
+    strikes = Math.max(0, strikes - dt * MSG_RATE / 4);
+    if (msgs < 1 || bytes < data.length) { if (++strikes > STRIKES) ws.close(1008, 'too many messages'); return; }
+    msgs--; bytes -= data.length;
     if (isBinary) return;
     const raw = data.toString();
     let o; try { o = JSON.parse(raw); if (!o || typeof o !== 'object' || Array.isArray(o)) return; } catch { return; }

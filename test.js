@@ -290,6 +290,35 @@ const tick = () => new Promise(r => setTimeout(r, 100));
   for (const s of [guest, reuse]) s.close();
   console.log('seat keys ok');
 }
+
+// ---------- flood limits ----------
+{
+  const spam = await open('floodroom', 'spam1'); await tick();
+  const closed = new Promise(r => spam.on('close', c => r(c)));
+  for (let i = 0; i < 2000; i++) spam.send('{"v":1}');
+  assert.equal(await closed, 1008, 'a socket that floods is closed');
+  const calm = await open('floodroom2', 'calm1'), peer = await open('floodroom2', 'calm2'); await tick();
+  for (let i = 0; i < 20; i++) { calm.send(JSON.stringify({ v: 1, i })); await new Promise(r => setTimeout(r, 25)); }
+  await tick();
+  assert.equal(peer.msgs.filter(m => m.t === 'p').length, 20, 'a normal 40-a-second stream all gets through');
+  for (const s of [calm, peer]) s.close();
+
+  // small caps on a server of its own: 2 rooms, 3 sockets an address
+  const FP = 3993; await startServer(FP, { MAX_ROOMS: '2', MAX_PER_IP: '3' });
+  const at = (room, id) => new Promise((res, rej) => { const ws = new WebSocket(`ws://localhost:${FP}/ws?room=${room}&id=${id}&key=${keyOf(id)}`); ws.msgs = [];
+    ws.on('message', d => ws.msgs.push(JSON.parse(d))); ws.on('close', c => { ws.code = c; }); ws.on('open', () => res(ws)); ws.on('error', rej); });
+  const r1 = await at('r1', 'room1'), r2 = await at('r2', 'room2'), r3 = await at('r3', 'room3'); await tick();
+  assert.ok(r3.msgs.some(m => m.t === 'full'), 'no third room');
+  const r1b = await at('r1', 'room1b'); await tick(); // r3 closed, so this is the third socket again
+  assert.ok(!r1b.msgs.some(m => m.t === 'full'), 'existing rooms still take players');
+  const r1c = await at('r1', 'room1c'); await tick();
+  assert.equal(r1c.code, 1008, 'a fourth socket from one address is refused');
+  r1b.close(); await tick();
+  const r1d = await at('r1', 'room1d'); await tick();
+  assert.ok(r1d.code === undefined, 'a slot frees up when one closes');
+  for (const s of [r1, r2, r1d]) s.close();
+  console.log('flood limits ok');
+}
 {
   // /rooms reports a locked room as in progress (it has to be public to be listed)
   const pubOpen = id => new Promise((res, rej) => { const ws = new WebSocket(`${base}?room=pubbr&id=${id}&key=${keyOf(id)}&game=br&pub=1`); ws.msgs = []; ws.on('message', d => ws.msgs.push(JSON.parse(d))); ws.on('open', () => res(ws)); ws.on('error', rej); });
