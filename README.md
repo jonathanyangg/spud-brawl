@@ -60,7 +60,11 @@ cdnjs; where that host is blocked, point `THREE_JS` at a local r128 `three.min.j
 - `server.js`: serves `public/` and relays player state between everyone in a room over a WebSocket at `/ws`. No game logic lives on the server.
 - `api.js`: accounts, coins, daily spin, shop, Stripe Checkout and webhook, cloud save (`/api/...`; off until configured, see [SETUP.md](SETUP.md))
 - `supabase/schema.sql`: the database (profiles, purchases, row level security, atomic spin/buy/credit functions)
-- `public/game.js`: the game (rendering, physics, bots, HUD, online sync)
+- `public/game.js`: the game (rendering, physics, combat, loot, game types, menus, the main loop)
+- `public/bots.js`: bot brains, the roster, and the host's bots on everyone else's screen
+- `public/netsync.js`: online play (the presence each game streams, other players' events, who hosts the room)
+- `public/hud.js`: the HUD, kill feed and scoreboard, XP banners, the battle royale minimap
+- `public/util.js`: small shared helpers
 - `public/net.js`: WebSocket client, auto-reconnects
 - `public/world.js`: the list of maps and loading one
 - `public/kit.js`: the map-building kit: boxes, walls, floors, stairs, jump pads, textures
