@@ -16,7 +16,10 @@ match, Back to lobby returns there; anyone who joins while a match is on goes st
   the gun in your hands. Pick Solo, Duos, Trios or Squads: online, players in the same room fill squads in the order they
   join and bots fill the rest; squadmates can't hurt each other, the last squad standing wins, and once you're out you
   spectate your squad (Space for the next one). Heal on kill (+25 or +50 HP per elimination) is an option. Reloads use the ammo you carry, you can hold the
-  knife and three guns, and whoever goes down drops what they had. The storm closes in over five phases, sized to the
+  knife and three guns, and whoever goes down drops what they had. Bots play by the same rules: they pick up the ammo,
+  heals and frags they're short of, run guns dry, and throw frags. About 75 seconds after the drop the blimp comes back
+  for a second pass and drops a supply crate on a parachute (shown on the map a few seconds ahead): one Epic or
+  Legendary gun with extra ammo, a medkit, bandages and frags. The storm closes in over five phases, sized to the
   map, and starts after the drop. A minimap shows the circle, the blimp's route and chests near you. Last one
   standing wins.
 - **Zombies** (co-op waves), **Gun Game**, **Moon Knives** (knives only, low gravity), **Snipers Only** (one body shot

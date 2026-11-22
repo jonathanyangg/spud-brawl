@@ -179,8 +179,10 @@ function handleNetEvent(r, e) {
   } else if (type === 'n') {
     const t = NADE_TYPES[clamp(e[8] | 0, 0, NADE_TYPES.length - 1)], v = c => clamp(num(c), -60, 60);
     const nl = LIMIT + 10, pos = new V3(clamp(num(e[2]), -nl, nl), clamp(num(e[3]), -5, 130), clamp(num(e[4]), -nl, nl));
-    spawnNade(pos, new V3(v(e[5]), v(e[6]), v(e[7])), r, t);
-    if (t === 'rocket') sfxShot(4, distVol(r.pos));
+    // one of the host's bots threw or fired it: theirs, so its blast hurts and credits like the bot's
+    const who = (typeof e[9] === 'string' && e[9] && r.peer === net.host && net.bots.get(e[9])) || r;
+    spawnNade(pos, new V3(v(e[5]), v(e[6]), v(e[7])), who, t);
+    if (t === 'rocket') sfxShot(4, distVol(who.pos));
   } else if (type === 'c') {
     openChest(e[2] | 0, r, true);
   } else if (type === 'pk') {

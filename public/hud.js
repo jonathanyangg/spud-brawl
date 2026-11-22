@@ -5,7 +5,7 @@ import { sfx } from './audio.js';
 import * as P from './progress.js';
 import { $, V3, clamp } from './util.js';
 import {
-  AIM, CH, FLIGHT, Z, binds, brAlive, camera, carries, currentSpread, dressVM, ents, fixSlots, flightT, game, gunsFor, host, isUp, knifeFull,
+  AIM, CH, FLIGHT, SUPPLY, Z, binds, brAlive, camera, carries, currentSpread, dressVM, ents, fixSlots, flightT, game, gunsFor, host, isUp, knifeFull,
   lootName, nadesOn, nearChest, nearGun, now, oneLife, player, prog, rarCss, rayWorld, refreshVM, sameTeam, saveProgress, scoreLimit, slotIdx,
   spec, squadmates, squadsOn, state, storm, stormText, teamScore, teamsOn, zLeft, zoomed
 } from './game.js';
@@ -246,7 +246,10 @@ function drawMinimap() {
     g.beginPath(); g.arc(X(FLIGHT.ax + (FLIGHT.bx - FLIGHT.ax) * t), X(FLIGHT.az + (FLIGHT.bz - FLIGHT.az) * t), 7 * u, 0, Math.PI * 2); g.fill();
   }
   g.fillStyle = '#ffc83d';
-  for (const c of CH.list) if (!c.open && Math.hypot(c.x - player.pos.x, c.z - player.pos.z) < 45) g.fillRect(X(c.x) - 3 * u, X(c.z) - 3 * u, 6 * u, 6 * u);
+  for (const c of CH.list) if (!c.open && !c.supply && Math.hypot(c.x - player.pos.x, c.z - player.pos.z) < 45) g.fillRect(X(c.x) - 3 * u, X(c.z) - 3 * u, 6 * u, 6 * u);
+  if (SUPPLY.warned && !(SUPPLY.crate && SUPPLY.crate.open)) { // the supply drop: wherever it is
+    g.fillStyle = '#ff7a1a'; g.strokeStyle = '#1b1208'; g.lineWidth = 2 * u; g.fillRect(X(SUPPLY.x) - 6 * u, X(SUPPLY.z) - 6 * u, 12 * u, 12 * u); g.strokeRect(X(SUPPLY.x) - 6 * u, X(SUPPLY.z) - 6 * u, 12 * u, 12 * u);
+  }
   if (storm.on) {
     g.fillStyle = 'rgba(150,60,220,.45)'; g.beginPath(); g.rect(0, 0, S, S); g.arc(X(storm.x), X(storm.z), Math.max(0, storm.r * k), 0, Math.PI * 2, true); g.fill('evenodd');
     g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 2 * u; g.beginPath(); g.arc(X(storm.tx), X(storm.tz), Math.max(0, storm.tr * k), 0, Math.PI * 2); g.stroke();

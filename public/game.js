@@ -506,7 +506,7 @@ export function tryFire(e) {
   if (w.kind === 'rpg') {
     const pos = _o.clone().addScaledVector(_f, 0.7), vel = spreadDir(_f, spread).multiplyScalar(42);
     spawnNade(pos, vel, e, 'rocket');
-    if (e.isPlayer && mode === 'online') netEvent('n', r2(pos.x), r2(pos.y), r2(pos.z), r2(vel.x), r2(vel.y), r2(vel.z), NADE_TYPES.indexOf('rocket'));
+    if ((e.isPlayer || e.ai) && mode === 'online') netEvent('n', r2(pos.x), r2(pos.y), r2(pos.z), r2(vel.x), r2(vel.y), r2(vel.z), NADE_TYPES.indexOf('rocket'), e.ai ? 'b' + e.bid : '');
   } else {
     const muzzle = muzzlePos(e), acc = new Map(), ends = [];
     for (let i = 0; i < w.pellets; i++) ends.push(hitscan(e, _o, spreadDir(_f, spread), w, muzzle, acc));
@@ -617,7 +617,7 @@ const nadeMats = {
   flash: new THREE.MeshLambertMaterial({ color: 0xd8dcdf }), rocket: new THREE.MeshLambertMaterial({ color: 0x6b5a3e }),
 };
 const nadeG = new THREE.SphereGeometry(0.15, 10, 8);
-function throwNade(e) {
+export function throwNade(e) {
   if (now < e.nadeReady || !e.alive || !nadesOn() || e.drop) return;
   if (oneLife() && !(e.frags > 0)) { if (e.isPlayer) toast('No frags: find them in chests'); return; }
   const type = oneLife() ? 'frag' : THROWABLES[e.nade] ? e.nade : 'frag';
@@ -627,10 +627,22 @@ function throwNade(e) {
   const pos = eyePos(e).addScaledVector(f, 0.6);
   const vel = f.multiplyScalar(17).add(new V3(0, 4, 0)).addScaledVector(e.vel, 0.5);
   spawnNade(pos, vel, e, type);
-  if (e.isPlayer) {
-    sfx.toss();
-    if (mode === 'online') netEvent('n', r2(pos.x), r2(pos.y), r2(pos.z), r2(vel.x), r2(vel.y), r2(vel.z), NADE_TYPES.indexOf(type));
+  if (e.isPlayer) sfx.toss();
+  // the host's bots throw too: the bot's id tells everyone else whose grenade it is
+  if ((e.isPlayer || e.ai) && mode === 'online') netEvent('n', r2(pos.x), r2(pos.y), r2(pos.z), r2(vel.x), r2(vel.y), r2(vel.z), NADE_TYPES.indexOf(type), e.ai ? 'b' + e.bid : '');
+}
+// a bot lobs a frag at (x, y, z): face it and pick the pitch whose arc comes down nearest the spot
+export function botThrow(b, x, y, z) {
+  const dx = x - b.pos.x, dz = z - b.pos.z, d = Math.hypot(dx, dz), dy = y - (b.pos.y + 1.5), g = grav();
+  let best = 0.3, err = Infinity;
+  for (let p = -0.3; p <= 1.2; p += 0.02) {
+    const vx = 17 * Math.cos(p), vy = 17 * Math.sin(p) + 4, t = d / vx, e = Math.abs(vy * t - (g * t * t) / 2 - dy);
+    if (e < err) { err = e; best = p; }
   }
+  const yaw = b.yaw, pitch = b.pitch;
+  b.yaw = Math.atan2(-dx, -dz); b.pitch = best;
+  throwNade(b);
+  b.yaw = yaw; b.pitch = pitch;
 }
 export function spawnNade(pos, vel, owner, type = 'frag') {
   const m = new THREE.Mesh(nadeG, nadeMats[type]); m.castShadow = true; scene.add(m);
@@ -1527,6 +1539,83 @@ function updateFlight() {
   FLIGHT.mesh.rotation.set(Math.sin(now * 0.7) * 0.03, Math.atan2(-(FLIGHT.bx - FLIGHT.ax), -(FLIGHT.bz - FLIGHT.az)), Math.sin(now * 0.5) * 0.04);
   if (t > 1.25) { FLIGHT.on = false; FLIGHT.mesh.visible = false; }
 }
+
+// ---------- battle royale: the supply drop ----------
+// Partway through the match the blimp comes back over the island and drops one crate of top-tier loot on a parachute.
+// Where and when are seeded like the rest, so every screen in a room sees the same drop without a word on the network;
+// the crate is the last chest in the list, so opening it and picking up its loot travel like any chest's.
+const SUPPLY_AFTER = 75, SUPPLY_WARN = 10, CRATE_FALL = 5; // s after the first pass leaves; s of warning; m/s down
+export const SUPPLY = { state: 'off', at: 0, dur: 1, ax: 0, az: 0, bx: 0, bz: 0, x: 0, z: 0, crate: null, warned: false, pendingOpen: false };
+const supplyM = {
+  trim: new THREE.MeshLambertMaterial({ color: 0xff7a1a }), chute: new THREE.MeshLambertMaterial({ color: 0xf2efe6, side: THREE.DoubleSide }),
+  beam: new THREE.MeshBasicMaterial({ color: 0xff9a3c, transparent: true, opacity: 0.3, depthWrite: false }),
+};
+function resetSupply() {
+  Object.assign(SUPPLY, { state: oneLife() && FLIGHT.on ? 'wait' : 'off', crate: null, warned: false, pendingOpen: false });
+  if (SUPPLY.state === 'off') return;
+  const r = rng(hashStr(brKey() + ':supply')), lim = HALF * 0.7;
+  const spots = SPAWNS.filter(s => Math.abs(s[0]) < lim && Math.abs(s[1]) < lim);
+  // a spot a few metres off a spawn (maps keep chests by them), short of any wall: the first of a few seeded tries
+  // that lands on open ground well clear of every chest
+  const list = spots.length ? spots : SPAWNS.length ? SPAWNS : [[0, 0]], dir = new V3();
+  let s = list[0];
+  for (let k = 0; k < 16; k++) {
+    const b = list[(r() * list.length) | 0], ao = r() * Math.PI * 2; dir.set(Math.cos(ao), 0, Math.sin(ao));
+    const od = Math.max(0, Math.min(6, rayWorld(_dp.set(b[0], 1, b[1]), dir, 7) - 1.5)), x = b[0] + dir.x * od, z = b[1] + dir.z * od;
+    s = [x, z];
+    if (floorBelow(x, 60, z) - floorBelow(b[0], 60, b[1]) < 0.6 && CH.list.every(c => Math.hypot(c.x - x, c.z - z) > 4)) break;
+  }
+  const a = r() * Math.PI * 2, L = LIMIT * 1.35, dx = Math.cos(a), dz = Math.sin(a);
+  SUPPLY.x = s[0]; SUPPLY.z = s[1]; // the route crosses the island with the drop spot halfway along
+  SUPPLY.ax = s[0] - dx * L; SUPPLY.az = s[1] - dz * L; SUPPLY.bx = s[0] + dx * L; SUPPLY.bz = s[1] + dz * L;
+  SUPPLY.dur = 2 * L / 22; SUPPLY.at = FLIGHT.t0 + FLIGHT.dur * 1.25 + SUPPLY_AFTER;
+}
+function spawnCrate() {
+  const y0 = FLIGHT.y - 5, gy = floorBelow(SUPPLY.x, y0, SUPPLY.z);
+  const c = { i: CH.list.length, x: SUPPLY.x, y: y0, z: SUPPLY.z, gy, rot: 0, open: false, claim: null, supply: true, falling: true };
+  chestMesh(c); CH.list.push(c); SUPPLY.crate = c;
+  c.mesh.scale.setScalar(1.4); c.trims.forEach(m => { m.material = supplyM.trim; });
+  c.beam.material = supplyM.beam; c.beam.scale.set(2.5, 60, 2.5); c.beam.position.y = 30; c.beam.visible = false;
+  const chute = new THREE.Group(), dome = new THREE.Mesh(canopyG, supplyM.chute); dome.scale.set(1.3, 0.8, 1.3); dome.position.y = 3.2; chute.add(dome);
+  for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { const l = new THREE.Mesh(boxGeo, SM.gear); l.scale.set(0.03, 2.6, 0.03); l.position.set(x * 0.55, 1.9, z * 0.45); l.rotation.set(z * 0.3, 0, -x * 0.3); chute.add(l); }
+  c.mesh.add(chute); c.chute = chute;
+}
+export function updateSupply(dt) {
+  const S = SUPPLY;
+  if (S.state === 'off') return;
+  if (S.state === 'wait') {
+    if (!S.warned && now >= S.at - SUPPLY_WARN) { S.warned = true; if (state === 'playing') { toast('Supply drop incoming: <em></em>', 'top-tier loot, marked on your map', false); sfx.pad(); } MM.at = 0; }
+    if (now < S.at) return;
+    S.state = 'fly';
+  }
+  if (S.state === 'fly') {
+    const t = (now - S.at) / S.dur, m = FLIGHT.mesh;
+    if (m && !FLIGHT.on) {
+      m.visible = t <= 1.1;
+      m.position.set(S.ax + (S.bx - S.ax) * t, FLIGHT.y, S.az + (S.bz - S.az) * t);
+      m.rotation.set(Math.sin(now * 0.7) * 0.03, Math.atan2(-(S.bx - S.ax), -(S.bz - S.az)), Math.sin(now * 0.5) * 0.04);
+    }
+    if (t >= 0.5 && !S.crate) spawnCrate();
+    if (t > 1.1) { S.state = 'done'; if (m && !FLIGHT.on) m.visible = false; }
+  }
+  const c = S.crate;
+  if (c && c.falling) {
+    c.y = Math.max(c.gy, c.y - CRATE_FALL * dt); c.mesh.position.y = c.y;
+    c.mesh.rotation.z = Math.sin(now * 1.3) * 0.06; // swinging under the chute
+    if (c.y <= c.gy) {
+      c.falling = false; c.mesh.rotation.z = 0; c.mesh.remove(c.chute); c.beam.visible = true;
+      if (state === 'playing') sfx.land(distVol(c.mesh.position));
+      if (S.pendingOpen) openChest(c.i, null, true); // someone else's screen already opened it
+    }
+  }
+}
+// the crate's loot: one Epic or Legendary gun, plenty of ammo for it, a medkit, bandages and frags
+function supplyLoot(i) {
+  const r = rng(hashStr(brKey() + ':supply' + i)), guns = CHEST_GUNS.filter(([id]) => id !== KNIFE);
+  const gid = guns[(r() * guns.length) | 0][0];
+  return [{ kind: 'gun', w: gid, qty: WEAPONS[gid].mag, r: r() < 0.45 ? 4 : 3 }, { kind: 'ammo', type: AMMO_OF[gid], qty: AMMO[AMMO_OF[gid]].pack * 2 },
+    { kind: 'heal', type: 'medkit', qty: 1 }, { kind: 'heal', type: 'bandage', qty: 2 }, { kind: 'frag', qty: 2 }];
+}
 // a soldier's glider: a canopy over their head while they come down
 const canopyM = new THREE.MeshLambertMaterial({ color: 0xffc83d, side: THREE.DoubleSide });
 const canopyG = new THREE.SphereGeometry(1.5, 14, 6, 0, Math.PI * 2, 0, Math.PI / 2.6);
@@ -1657,6 +1746,7 @@ function rollRarity(r) {
   return 0;
 }
 function chestLoot(i) {
+  if (CH.list[i]?.supply) return supplyLoot(i);
   const r = rng(hashStr(brKey() + ':c' + i)), out = [];
   let x = r() * CHEST_GUNS.reduce((a, g) => a + g[1], 0), gid = CHEST_GUNS[0][0];
   for (const [id, w] of CHEST_GUNS) if ((x -= w) < 0) { gid = id; break; }
@@ -1714,7 +1804,10 @@ export function takeItem(it, quiet) {
   if (!quiet && mode === 'online') netEvent('pk', it.id);
 }
 export function openChest(i, by, fromNet) {
-  const c = CH.list[i]; if (!c || c.open) return;
+  const c = CH.list[i];
+  // the supply crate on someone else's screen opened before it landed (or even appeared) on mine: open it when it lands
+  if (fromNet && SUPPLY.state !== 'off' && (c ? c.falling : i === CH.list.length && !SUPPLY.crate)) { SUPPLY.pendingOpen = true; return; }
+  if (!c || c.open || c.falling) return;
   c.open = true; c.beam.visible = false; c.trims.forEach(m => { m.material = LM.spent; });
   if (state === 'playing') sfx.chest(by === player ? 1 : distVol(c.mesh.position));
   const loot = chestLoot(i);
@@ -1764,8 +1857,7 @@ function dropGun(e, i) {
 function dropAll(e) {
   const list = [];
   e.guns.forEach((g, i) => { if (g.kind !== 'melee') list.push({ kind: 'gun', w: g.id, qty: Math.max(1, e.ammo[i]), r: g.rar | 0 }); });
-  if (e.isPlayer) { for (const k of AMMO_KEYS) if (e.res[k] > 0) list.push({ kind: 'ammo', type: k, qty: e.res[k] }); }
-  else for (const g of e.guns) if (AMMO_OF[g.id]) list.push({ kind: 'ammo', type: AMMO_OF[g.id], qty: AMMO[AMMO_OF[g.id]].pack });
+  for (const k of AMMO_KEYS) if (e.res[k] > 0) list.push({ kind: 'ammo', type: k, qty: e.res[k] });
   for (const k of HEAL_KEYS) if (e.heals[k] > 0) list.push({ kind: 'heal', type: k, qty: e.heals[k] });
   if (e.frags > 0) list.push({ kind: 'frag', qty: e.frags });
   dropItems(e, list.slice(0, 12));
@@ -1789,11 +1881,9 @@ function autoPickup(e) {
     if (it.kind === 'gun') {
       if (e.guns.length < MAX_SLOTS && !e.guns.some(g => g.id === it.w)) { giveGun(e, it.w, it.qty, undefined, it.r); took = it.qty; }
     } else if (it.kind === 'ammo') {
-      if (!e.isPlayer) continue; // bots never run dry, so they leave ammo for the players
       const n = Math.min(AMMO[it.type].max - (e.res[it.type] || 0), it.qty);
       if (n > 0) { e.res[it.type] = (e.res[it.type] || 0) + n; it.qty -= n; took = n; }
     } else if (it.kind === 'frag') {
-      if (!e.isPlayer) continue; // bots don't throw, so they leave frags for the players
       const n = Math.min(FRAGS.max - (e.frags || 0), it.qty);
       if (n > 0) { e.frags = (e.frags || 0) + n; it.qty -= n; took = n; }
     } else {
@@ -1808,7 +1898,7 @@ function autoPickup(e) {
 const nearTo = (e, x, y, z, reach) => Math.abs(y - e.pos.y) < 1.6 && Math.hypot(x - e.pos.x, z - e.pos.z) < reach;
 export function nearChest(e, reach = 2.2) {
   let best = null, bd = Infinity;
-  for (const c of CH.list) if (!c.open && nearTo(e, c.x, c.y, c.z, reach)) { const d = Math.hypot(c.x - e.pos.x, c.z - e.pos.z); if (d < bd) { bd = d; best = c; } }
+  for (const c of CH.list) if (!c.open && !c.falling && nearTo(e, c.x, c.y, c.z, reach)) { const d = Math.hypot(c.x - e.pos.x, c.z - e.pos.z); if (d < bd) { bd = d; best = c; } }
   return best;
 }
 export function nearGun(e) {
@@ -1831,25 +1921,46 @@ function useKey(p) {
   takeItem(it); giveGun(p, it.w, it.qty, slot, it.r); p.guns[slot].slot = old.slot; switchWeapon(p, slot); sfx.pick();
   toast('Swapped for <em></em>', lootName(it), false);
 }
-// bots: open a chest when they reach it, and go for one (or a gun on the floor) while they're short of guns
+// bots: open a chest when they reach it, go for one (or a gun on the floor) while they're short of guns, and pick up
+// the ammo, heals and frags they're low on
+function botWants(b, it) {
+  if (it.kind === 'gun') return b.guns.length < MAX_SLOTS && !b.guns.some(g => g.id === it.w);
+  if (it.kind === 'ammo') return b.guns.some(g => AMMO_OF[g.id] === it.type) && (b.res[it.type] || 0) < AMMO[it.type].max * 0.6;
+  if (it.kind === 'frag') return (b.frags || 0) < FRAGS.max;
+  return (b.heals[it.type] || 0) < HEALS[it.type].max;
+}
 function findLoot(b) {
   let best = null, bs = Infinity;
   const inStorm = (x, z) => !storm.on || Math.hypot(x - storm.x, z - storm.z) < storm.r - 3;
-  const consider = (o, x, y, z) => { const d = Math.hypot(x - b.pos.x, z - b.pos.z) + 12 * Math.abs(y - b.pos.y); if (d < 60 && d < bs && inStorm(x, z)) { bs = d; best = o; } };
-  for (const c of CH.list) if (!c.open && !(c.claim && c.claim !== b && c.claim.alive)) consider(c, c.x, c.y, c.z); // leave other bots' claims alone
-  for (const it of CH.items) if (it.kind === 'gun' && !b.guns.some(g => g.id === it.w)) consider(it, it.x, it.y, it.z);
+  const consider = (o, x, y, z, far) => { const d = Math.hypot(x - b.pos.x, z - b.pos.z) + 12 * Math.abs(y - b.pos.y); if (d < far && d < bs && inStorm(x, z)) { bs = d; best = o; } };
+  const short = b.guns.length < MAX_SLOTS;
+  for (const c of CH.list) if (!c.open && !c.falling && !(c.claim && c.claim !== b && c.claim.alive)) consider(c, c.x, c.y, c.z, short ? 60 : 25); // leave other bots' claims alone
+  for (const it of CH.items) if (botWants(b, it)) consider(it, it.x, it.y, it.z, it.kind === 'gun' ? 60 : 30);
   return best;
 }
 export function botLoot(b, ai) {
   const c = nearChest(b, 1.8); if (c) openChest(c.i, b);
-  const valid = ai.loot && (ai.loot.spin ? CH.byId.get(ai.loot.id) === ai.loot : !ai.loot.open);
+  const valid = ai.loot && (ai.loot.spin ? CH.byId.get(ai.loot.id) === ai.loot && botWants(b, ai.loot) : !ai.loot.open);
   if (!valid) ai.loot = null;
-  if (b.guns.length >= 3) { ai.loot = null; return; }
-  if (!ai.loot || now > ai.lootUntil) {
-    ai.loot = findLoot(b); ai.lootUntil = now + 15;
+  // a chest just opened spills its loot: look again soon so the bot picks it up before walking off
+  if (!ai.loot || now > ai.lootUntil || (!ai.loot.spin && now > (ai.lootLook || 0))) {
+    ai.lootLook = now + 1;
+    const was = ai.loot;
+    ai.loot = findLoot(b);
+    if (ai.loot !== was) ai.lootUntil = now + 15;
     if (ai.loot) { ai.goal = new V3(ai.loot.x, ai.loot.y, ai.loot.z); ai.goalExpire = now + 15; }
   }
   if (ai.loot && ai.goal) ai.goal.set(ai.loot.x, ai.loot.y, ai.loot.z); // don't wander off once close
+}
+// a bot whose gun is empty with nothing left to load swaps to one that can shoot, or the knife
+const canShoot = (e, i) => { const g = e.guns[i]; return g && g.kind !== 'melee' && (e.ammo[i] > 0 || !carries(e) || !AMMO_OF[g.id] || e.res[AMMO_OF[g.id]] > 0); };
+export function botArm(b) {
+  if (!oneLife() || b.reloading || b.useT || now < b.nextShot) return;
+  const cur = b.guns[b.weapon];
+  if (cur && cur.kind !== 'melee' && canShoot(b, b.weapon)) return;
+  let k = b.guns.findIndex((g, i) => canShoot(b, i));
+  if (k < 0) { if (cur && cur.kind === 'melee') return; k = b.guns.findIndex(g => g.kind === 'melee'); }
+  if (k >= 0 && k !== b.weapon) switchWeapon(b, k);
 }
 
 // ---------- heals ----------
@@ -1892,8 +2003,8 @@ function updateHeal(e) {
   e.heals[u.type]--; e.hp = Math.max(e.hp, Math.min(h.cap || 100, e.hp + h.hp)); e.useT = null;
   if (e.isPlayer) { sfx.heal(); toast('Used <em></em>', h.name, false); }
 }
-// reloading in battle royale draws on the ammo you carry; everywhere else (and for bots) mags are free
-export const carries = e => oneLife() && e.isPlayer;
+// reloading in battle royale draws on the ammo you carry (bots too); everywhere else mags are free
+export const carries = e => oneLife() && (e.isPlayer || !!e.ai);
 function finishReload(e) {
   const i = e.reloadWeapon, w = e.guns[i]; e.reloading = false; if (!w) return;
   let need = w.mag - e.ammo[i];
@@ -1915,7 +2026,7 @@ function updateLoot(dt) {
 }
 export function resetBR() {
   brSeed = Math.random().toString(36).slice(2);
-  resetFlight(); resetLoot(); resetStorm(); hideSelf();
+  resetFlight(); resetLoot(); resetSupply(); resetStorm(); hideSelf();
   MM.at = 0;
 }
 
@@ -2487,6 +2598,9 @@ if (matchMedia('(pointer: coarse)').matches && !matchMedia('(any-pointer: fine)'
 let last = performance.now();
 function frame(t) {
   requestAnimationFrame(frame);
+  tick(t);
+}
+function tick(t) {
   resize();
   const dt = Math.min(0.05, (t - last) / 1000); last = t;
   // online the world keeps going while you're paused (others are still playing); offline it waits for you
@@ -2499,7 +2613,7 @@ function frame(t) {
       if (e.useT && !e.remote) updateHeal(e);
     }
     if (mode === 'online') { updateRemotes(dt); updateRoster(); }
-    updateZombies(dt); updateAim(); updateStorm(dt); updateFlight(); updateLoot(dt);
+    updateZombies(dt); updateAim(); updateStorm(dt); updateFlight(); updateSupply(dt); updateLoot(dt);
     updateNades(dt); updateParts(dt);
     for (const tr of tracers) if (tr.visible) { tr.userData.life -= dt; tr.material.opacity = tr.userData.life / 0.08; if (tr.userData.life <= 0) tr.visible = false; }
     for (const b of blasts) if (b.m.visible) { b.t += dt / 0.35; b.m.scale.setScalar(0.5 + b.t * 5.5); b.m.material.opacity = Math.max(0, 0.85 * (1 - b.t)); if (b.t >= 1) b.m.visible = false; }
@@ -2550,7 +2664,7 @@ function frame(t) {
   if (showVM) { renderer.clearDepth(); renderer.render(vmScene, vmCam); }
 }
 
-if (location.hostname === 'localhost') window.__spud = { player, net, ents, prog, Z, AIM, settings, tryFire, teamScore, storm,
+if (location.hostname === 'localhost') window.__spud = { step: n => { for (let i = 0; i < n; i++) tick(last + 50); }, player, net, ents, prog, Z, AIM, settings, tryFire, teamScore, storm,
   CH, FLIGHT, useKey, startHeal, get LIMIT() { return LIMIT; },
   applyRemote: (id, s, seat) => applyRemote(id, s, seat), renderLobbyUI: () => renderLobbyUI(lobbyGroups()), enterLobby: () => enterLobby(),
   camAt: (x, y, z, tx, ty, tz) => { camHold = true; camera.position.set(x, y, z); camera.lookAt(tx, ty, tz); }, boxes, STAIRS, PADS, SPAWNS, startGame, toMenu: () => toMenu(), get game() { return game; }, get state() { return state; }, get now() { return now; },

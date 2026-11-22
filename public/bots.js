@@ -5,7 +5,7 @@ import { buildNav, navToward } from './nav.js';
 import { sfxShot } from './audio.js';
 import { V3, clamp, rand } from './util.js';
 import {
-  DROP_ST, FLIGHT, LOOT_WINDOW, _f, _h, _o, angDiff, botDrop, botLoot, botSquads, cfg, distVol, ents, eyePos, fwdVec, grip, headC, moveEntity,
+  DROP_ST, FLIGHT, LOOT_WINDOW, _f, _h, _o, angDiff, botArm, botDrop, botLoot, botThrow, botSquads, cfg, distVol, ents, eyePos, fwdVec, grip, headC, moveEntity,
   muzzleOf, newEntity, now, oneLife, pick, player, poseK, poseSoldier, randomLook, rayWorld, respawn, sameTeam, scene, soldierMesh, squadsOn,
   startHeal, startReload, state, storm, teams, teamsOn, tracer, tryFire, versus
 } from './game.js';
@@ -141,6 +141,13 @@ export function updateBot(b, dt) {
   const engage = tgt && (!knifeOnly || tdist < 4 || b.hurtBy === tgt);
   const threat = tgt && !engage && knifeOnly && tgt.guns.length > 1 && tdist < 20 ? tgt : null;
   if (oneLife() && !tgt && b.hp < 65 && !b.useT) startHeal(b);
+  if (oneLife()) botArm(b);
+  // battle royale: a frag at someone in the open at mid range, or where they ducked out of sight a moment ago
+  if (oneLife() && b.frags > 0 && now > (ai.nextNade || 0) && !b.reloading && !b.useT && !knifeOnly && ai.target?.alive) {
+    const lost = !tgt && now - ai.lastSeenAt < 2.5, at = tgt ? tgt.pos : lost ? ai.lastSeen : null;
+    const d = at ? Math.hypot(at.x - b.pos.x, at.z - b.pos.z) : 0;
+    if (at && d > 9 && d < 26 && Math.random() < dt * (lost ? 1.2 : 0.35)) { botThrow(b, at.x, at.y, at.z); ai.nextNade = now + rand(5, 9); }
+  }
   if (engage) {
     const to = new V3(tgt.pos.x - b.pos.x, 0, tgt.pos.z - b.pos.z); const dist = to.length(); to.divideScalar(dist || 1);
     if (now > ai.strafeSwitch) { ai.strafeDir = Math.random() < 0.5 ? -1 : 1; ai.strafeSwitch = now + rand(0.5, 1.6); }
