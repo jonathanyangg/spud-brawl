@@ -296,6 +296,42 @@ const tick = () => new Promise(r => setTimeout(r, 100));
   console.log('seat keys ok');
 }
 
+// ---------- hit reports no real game could make are thrown out ----------
+{
+  const SG = WEAPONS.findIndex(w => w.name === 'Shotgun'), AR = WEAPONS.findIndex(w => w.name === 'AR');
+  const host = await open('hitroom', 'hhost1', 'yard', 'ffa');
+  const shot = await open('hitroom', 'shoot2'), tgt = await open('hitroom', 'targ3'); await tick();
+  const bots = [[7, 'Bot', -1, 10, 0, 0, 0, 0, 3, 1], [8, 'Down', -1, 0, 0, 5, 0, 0, 3, 0]];
+  const pres = (p, ev, extra = {}) => JSON.stringify({ v: 1, p, dd: 0, lb: 0, ev, ...extra });
+  host.send(pres([0, 0, 0], [], { bt: bots }));
+  tgt.send(pres([300, 0, 0], [])); await tick();
+  const hitsFrom = (ws, k) => ws.msgs.filter(m => m.t === 'p' && m.k === k).at(-1)?.pr.ev.map(e => e[0]) ?? [];
+  let ev = [[1, 'h', 'targ3', 40, 0, SG, '']]; // 300 m away with a shotgun
+  shot.send(pres([0, 0, 0], ev)); await tick();
+  assert.deepEqual(hitsFrom(tgt, 'shoot2'), [], 'a shotgun hit from 300 m is dropped');
+  tgt.send(pres([20, 0, 0], [])); await tick();
+  ev = [...ev, [2, 'h', 'targ3', 40, 0, SG, '']];
+  shot.send(pres([0, 0, 0], ev)); await tick();
+  assert.deepEqual(hitsFrom(tgt, 'shoot2'), [2], 'from 20 m it goes through, and the dropped one stays dropped');
+  ev = [...ev, [3, 'h', 'targ3', 5000, 1, AR, '']];
+  shot.send(pres([0, 0, 0], ev)); await tick();
+  assert.deepEqual(hitsFrom(tgt, 'shoot2'), [2], 'more than one shot can do');
+  ev = [...ev, ...Array.from({ length: 30 }, (_, i) => [4 + i, 'h', 'targ3', 70, 1, AR, ''])];
+  shot.send(pres([0, 0, 0], ev)); await tick();
+  const got = hitsFrom(tgt, 'shoot2');
+  assert.ok(got.length > 3 && got.length < 31, `the AR's fire rate caps damage per second (${got.length - 1} of 30 kept)`);
+  shot.send(pres([0, 0, 0], [], { dd: 1 })); await tick();
+  shot.send(pres([0, 0, 0], [[40, 'h', 'targ3', 10, 0, AR, '']], { dd: 1 })); await tick();
+  assert.deepEqual(hitsFrom(tgt, 'shoot2'), [], 'no hits while you are dead');
+  shot.send(pres([0, 0, 0], [[41, 'h', 'targ3', 10, 0, AR, 'b7']])); await tick();
+  assert.deepEqual(hitsFrom(tgt, 'shoot2'), [], "only the host's game shoots for bots");
+  host.send(pres([0, 0, 0], [], { dd: 1, bt: bots })); await tick();
+  host.send(pres([0, 0, 0], [[1, 'h', 'targ3', 10, 0, AR, 'b7'], [2, 'h', 'targ3', 10, 0, AR, 'b8'], [3, 'h', 'b7', 10, 0, AR, '']], { dd: 1, bt: bots })); await tick();
+  assert.deepEqual(hitsFrom(tgt, 'hhost1'), [1], "the host's live bot still shoots while the host is down; a downed bot and the dead host don't");
+  for (const s of [host, shot, tgt]) s.close();
+  console.log('hit checks ok');
+}
+
 // ---------- flood limits ----------
 {
   const spam = await open('floodroom', 'spam1'); await tick();

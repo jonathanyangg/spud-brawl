@@ -58,6 +58,7 @@ cdnjs; where that host is blocked, point `THREE_JS` at a local r128 `three.min.j
 ## Layout
 
 - `server.js`: serves `public/` and relays player state between everyone in a room over a WebSocket at `/ws`. No game logic lives on the server.
+- `hitcheck.js`: the relay's light check on reported hits (see Netcode below)
 - `api.js`: accounts, coins, daily spin, shop, Stripe Checkout and webhook, cloud save (`/api/...`; off until configured, see [SETUP.md](SETUP.md))
 - `supabase/schema.sql`: the database (profiles, purchases, row level security, atomic spin/buy/credit functions)
 - `public/game.js`: the game (rendering, physics, combat, loot, game types, menus, the main loop)
@@ -121,7 +122,7 @@ Music can be turned off in the menu; **K** mutes everything (rebind it in Contro
 
 Pick **Online with friends**, type a room code, press **Join room**. **Copy invite link** gives a URL that drops friends into the same room. Up to 12 players per room. Whoever opens a room picks its game and map; everyone who joins plays those.
 
-Each client owns its own health: shooters report hits, and the player who was hit applies the damage and announces their own death. That's fine for friends, but it trusts the clients, so the server browser labels public rooms casual. The relay checks a secret key on reconnects (nobody can take your seat with your public id) and rate-limits each socket.
+Each client owns its own health: shooters report hits, and the player who was hit applies the damage and announces their own death. That's fine for friends, but it trusts the clients, so the server browser labels public rooms casual. The relay checks a secret key on reconnects (nobody can take your seat with your public id) and rate-limits each socket. It also drops hit reports no real game could make: hits from a player who is down or in the lobby, from beyond the gun's range, for more than one shot of that gun can do, or for more damage over two seconds than its fire rate allows. That stops a lazily modified client, not a careful one.
 
 In Zombies, one player runs the zombies for the room (the lowest player id still in the match) and streams them with their presence; everyone else sends their hits on zombies to that player. If they leave, the next player picks the zombies up where they are.
 

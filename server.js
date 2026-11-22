@@ -7,6 +7,7 @@ import { join, extname, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { handleApi } from './api.js';
+import { filterPresence } from './hitcheck.js';
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC = fileURLToPath(new URL('./public/', import.meta.url));
@@ -120,8 +121,10 @@ wss.on('connection', (ws, req) => {
       }
       return;
     }
-    ws.last = raw;
-    const msg = relay(id, raw, ws.team);
+    // throw out hit reports no real game could make (see hitcheck.js); the rest of the presence goes through as sent
+    const out = filterPresence(o, raw, ws, k => (k === id ? null : peers.get(k)?.pres), peers.values().next().value, now);
+    ws.last = out;
+    const msg = relay(id, out, ws.team);
     for (const [k, peer] of peers) if (k !== id && peer.readyState === 1) peer.send(msg);
   });
   ws.on('close', () => {
