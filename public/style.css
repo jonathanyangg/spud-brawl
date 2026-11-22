@@ -332,7 +332,7 @@ tr.me td{color:var(--butter)}
 .lbRow span{color:var(--muted);font-size:11px;white-space:nowrap}
 #lobbyMsg{margin:0;color:var(--muted);font-size:13px}
 #lobbyInviteOut{width:100%}
-#lobbyStart[hidden],#lobbyBtn[hidden]{display:none}
+#lobbyStart[hidden],#lobbyBtn[hidden],#lobbyReady[hidden]{display:none}
 
 /* the lobby leader's controls */
 #lobbySet{display:flex;flex-wrap:wrap;gap:8px 12px;justify-content:center;width:100%}

@@ -20,12 +20,12 @@ const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; ch
 const server = createServer(async (req, res) => {
   if (req.url.startsWith('/api/')) return handleApi(req, res);
   if (req.url === '/rooms') { // the server browser: public rooms with someone in them
-    const list = [...rooms].filter(([, r]) => r.pub && r.peers.size).map(([code, r]) => ({ code, map: r.map, game: r.game, players: r.peers.size, max: MAX_PLAYERS, bots: r.cfg.bots, ts: r.cfg.ts, sq: r.cfg.sq }));
+    const list = [...rooms].filter(([, r]) => r.pub && r.peers.size).map(([code, r]) => ({ code, map: r.map, game: r.game, players: r.peers.size, max: MAX_PLAYERS, bots: r.cfg.bots, ts: r.cfg.ts, sq: r.cfg.sq, busy: !!r.locked }));
     return res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(list));
   }
   try {
     const path = normalize(decodeURIComponent(new URL(req.url, 'http://x').pathname));
-    const file = join(PUBLIC, path.endsWith('/') ? path + 'index.html' : path);
+    const file = join(PUBLIC, /[\\/]$/.test(path) ? path + 'index.html' : path); // normalize gives '\' on Windows
     if (!file.startsWith(PUBLIC)) throw new Error('outside public');
     const body = await readFile(file);
     res.writeHead(200, { 'content-type': TYPES[extname(file)] || 'application/octet-stream', 'cache-control': 'no-cache' }).end(body);
@@ -54,11 +54,14 @@ wss.on('connection', (ws, req) => {
     cfg: { bots: int(q.get('bots'), 0, 11, 0), diff: DIFFS.includes(q.get('diff')) ? q.get('diff') : 'normal', ts: int(q.get('ts'), 1, 6, 4),
       lim: int(q.get('lim'), 5, 100, 25), side: q.get('side') === 'split' ? 'split' : 'together', sq: int(q.get('sq'), 1, 4, 1), hok: [0, 25, 50].includes(+q.get('hok')) ? +q.get('hok') : 0 }, // sq: battle royale squad size; hok: health back per kill
     pub: q.get('pub') === '1', peers: new Map(),
+    locked: false, inMatch: new Set(), seats: new Map(), // locked: a battle royale is on; inMatch: who was here when it started; seats: their squads
   });
   const peers = room.peers, old = peers.get(id);
+  // during a locked match only the players who were in it get back in (a dropped connection, a reload)
+  if (room.locked && !old && !room.inMatch.has(id)) { ws.send('{"t":"busy"}'); ws.close(); return; }
   if (old) { ws.team = old.team; old.terminate(); } // same player reconnecting: drop the stale socket, keep the seat
   else if (peers.size >= MAX_PLAYERS) { ws.send('{"t":"full"}'); ws.close(); return; }
-  else ws.team = pickTeam(room);
+  else ws.team = room.locked && room.seats.has(id) ? room.seats.get(id) : pickTeam(room);
   peers.set(id, ws);
   ws.send(roomMsg(room, ws));
 
@@ -72,9 +75,13 @@ wss.on('connection', (ws, req) => {
     const raw = data.toString();
     let o; try { o = JSON.parse(raw); if (!o || typeof o !== 'object' || Array.isArray(o)) return; } catch { return; }
     // the room's leader (its first peer) can change the room's settings and hand the lead to someone else
-    if (o.t === 'set' || o.t === 'lead') {
+    if (o.t === 'set' || o.t === 'lead' || o.t === 'lock') {
       if (peers.keys().next().value !== id) return;
-      if (o.t === 'set') {
+      if (o.t === 'lock') { // the leader started a battle royale (on) or it's over / they're back in the lobby (off)
+        room.locked = o.on === true;
+        room.inMatch = new Set(room.locked ? peers.keys() : []);
+        room.seats = new Map(room.locked ? [...peers].map(([k, v]) => [k, v.team]) : []);
+      } else if (o.t === 'set') {
         setRoom(room, o);
         const seated = []; for (const peer of peers.values()) { peer.team = pickTeam(room, seated); seated.push(peer); } // seat everyone again
         for (const peer of peers.values()) if (peer.readyState === 1) peer.send(roomMsg(room, peer));

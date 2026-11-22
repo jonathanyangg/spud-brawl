@@ -202,10 +202,10 @@ const tick = () => new Promise(r => setTimeout(r, 100));
   await tick();
   assert.equal(a.map, 'yard', 'first joiner picks the map'); assert.equal(b.map, 'yard', 'later joiners get the room map');
   assert.equal(b.game, 'zombies', 'and the room game');
-  assert.deepEqual(b.msgs[0], { t: 'p', k: 'aaaa1', pr: { v: 1, n: 'A' } }, 'newcomer gets snapshot');
+  assert.deepEqual(b.msgs[0], { t: 'p', k: 'aaaa1', tm: 0, pr: { v: 1, n: 'A' } }, 'newcomer gets snapshot, with the seat the server gave');
   b.send(JSON.stringify({ v: 1, n: 'B' })); b.send('not json');
   await tick();
-  assert.deepEqual(a.msgs, [{ t: 'p', k: 'bbbb2', pr: { v: 1, n: 'B' } }], 'relay to others only, junk dropped');
+  assert.deepEqual(a.msgs, [{ t: 'p', k: 'bbbb2', tm: 0, pr: { v: 1, n: 'B' } }], 'relay to others only, junk dropped');
   const other = await open('elsewhere', 'cccc3', 'nope');
   await tick(); assert.equal(other.map, 'depot', 'unknown map falls back to the default'); assert.equal(other.game, 'ffa', 'unknown game too');
   b.send(JSON.stringify({ v: 1, n: 'B2' })); await tick();
@@ -221,6 +221,39 @@ const tick = () => new Promise(r => setTimeout(r, 100));
   assert.equal((await fetch(`http://localhost:${PORT}/`)).status, 200);
   for (const s of [a, b, b2, other]) s.close();
   console.log('relay ok');
+}
+
+// ---------- battle royale room lock ----------
+{
+  const lead = await open('lockroom', 'lead1', 'yard', 'br');
+  const mate = await open('lockroom', 'mate2');
+  await tick();
+  mate.send(JSON.stringify({ t: 'lock', on: true })); await tick(); // not the leader: ignored
+  let late = await open('lockroom', 'late3'); await tick();
+  assert.ok(!late.msgs.some(m => m.t === 'busy'), 'only the leader can lock');
+  late.close(); await tick();
+  lead.send(JSON.stringify({ t: 'lock', on: true })); await tick();
+  late = await open('lockroom', 'late4'); await tick();
+  assert.ok(late.msgs.some(m => m.t === 'busy'), 'a newcomer is turned away while locked');
+  mate.close(); await tick();
+  const back = await open('lockroom', 'mate2'); await tick();
+  assert.ok(!back.msgs.some(m => m.t === 'busy'), 'a player from the match can reconnect');
+  lead.send(JSON.stringify({ t: 'lock', on: false })); await tick();
+  const after = await open('lockroom', 'late5'); await tick();
+  assert.ok(!after.msgs.some(m => m.t === 'busy'), 'unlocked: newcomers get in again');
+  for (const s of [lead, back, after, late]) s.close();
+  console.log('room lock ok');
+}
+{
+  // /rooms reports a locked room as in progress (it has to be public to be listed)
+  const pubOpen = id => new Promise((res, rej) => { const ws = new WebSocket(`${base}?room=pubbr&id=${id}&game=br&pub=1`); ws.msgs = []; ws.on('message', d => ws.msgs.push(JSON.parse(d))); ws.on('open', () => res(ws)); ws.on('error', rej); });
+  const lead = await pubOpen('plead1'); await tick();
+  const list = async () => (await (await fetch(`http://localhost:${PORT}/rooms`)).json()).find(r => r.code === 'pubbr');
+  assert.equal((await list()).busy, false, 'listed as open');
+  lead.send(JSON.stringify({ t: 'lock', on: true })); await tick();
+  assert.equal((await list()).busy, true, 'listed as in progress');
+  lead.close(); await tick();
+  console.log('rooms busy ok');
 }
 
 // ---------- /api with no env vars: off, and says so ----------

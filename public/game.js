@@ -611,8 +611,7 @@ function kill(t, src, wname, head) {
     $('deathHow').textContent = wname === 'Storm' ? 'Stay inside the circle.' : self ? 'Aim it a little further away.' : wname + (head ? ' \u00b7 headshot' : '');
     if (oneLife()) $('deathHow').textContent += ` \u00b7 you placed #${brAlive().length + 1}`;
     $('death').hidden = false; $('scope').hidden = true;
-    $('deathBtns').hidden = $('deathKeys').hidden = mode === 'online';
-    if (mode !== 'online') { closeInv(false); if (document.pointerLockElement) document.exitPointerLock(); }
+    deathButtons();
   }
   if (src && src.isPlayer && !self) { sfx.kill(); toast(`Eliminated <em></em>`, t.name, head); if (state === 'playing') awardKill(wname, head); }
   if (t.isPlayer && mode === 'online') netEvent('x', self ? '' : idOf(src), WNAMES.indexOf(wname), head ? 1 : 0);
@@ -1350,8 +1349,17 @@ function nextSpec() {
 // stop watching: back to the death card if you're still out (squad wiped), or nothing at all
 function endSpec(showDeath) {
   spec.who = null; $('spec').hidden = true;
-  if (showDeath && !player.alive && state === 'playing') $('death').hidden = false;
+  if (showDeath && !player.alive && state === 'playing') { $('death').hidden = false; deathButtons(); }
 }
+// the death card's buttons: offline always (Play again, Main menu); online only once you're out for good, in battle
+// royale with nobody left in your squad, and then they take you back to the lobby (ready for the next one, or not)
+function deathButtons() {
+  const online = mode === 'online', on = !online || (oneLife() && !squadmates().length);
+  $('deathBtns').hidden = !on; $('deathKeys').hidden = online || !on;
+  $('deathMenu').textContent = online ? 'Back to lobby' : 'Main menu';
+  if (on) { closeInv(false); if (document.pointerLockElement) document.exitPointerLock(); }
+}
+function deathToLobby(ready) { net.ready = ready; endSpec(); enterLobby(); }
 $('specNext').addEventListener('click', nextSpec);
 $('specAgain').addEventListener('click', () => playAgain());
 // on the blimp the camera sits behind it and you look around; once you jump it follows behind you so you see
@@ -1691,8 +1699,10 @@ function loadoutChanged() {
 // cfg: the room's settings; host: who runs the bots (the server says: whoever has been in the room longest);
 // bots: the host's bots as I see them (others' screens); tscore: the host's team scores
 const net = { room: null, status: '', myPeer: Math.random().toString(36).slice(2, 12), seq: 0, ev: [], lastSeq: new Map(), remotes: new Map(), m: 1, sendAt: 0,
-  cfg: null, host: null, bots: new Map(), tscore: null, rosterAt: 0 };
+  cfg: null, host: null, bots: new Map(), tscore: null, rosterAt: 0, ready: true };
 const botHost = () => mode === 'online' && net.host === net.myPeer;
+// the leader locks the room while a battle royale is on (newcomers are turned away) and unlocks it after
+const sendLock = on => { if (mode === 'online' && net.room && net.host === net.myPeer) net.room.control({ t: 'lock', on }); };
 const myHat = HATS[(Math.random() * HATS.length) | 0];
 const r2 = v => Math.round(v * 100) / 100;
 const num = v => (Number.isFinite(+v) ? +v : 0);
@@ -1717,7 +1727,7 @@ function netSend(force) {
     a: state === 'playing' && p.alive ? 1 : 0, dd: p.alive ? 0 : 1, hp: Math.ceil(p.hp), k: p.kills, d: p.deaths, ev: net.ev,
     cr: r2(p.crouch), sl: r2(p.slideK), tm: p.team, dr: p.drop ? DROP_ST.indexOf(p.drop.stage) : 0,
     bt: botHost() ? botState() : undefined, sto: botHost() && oneLife() ? stormState() : undefined, tsc: botHost() && teamsOn() ? teamScore() : undefined,
-    sk: prog.uniform, cm: prog.camo[p.guns[p.weapon].id], lv: P.level(prog), su: p.guns[p.weapon].sup ? 1 : 0, lb: state === 'lobby' ? 1 : 0,
+    sk: prog.uniform, cm: prog.camo[p.guns[p.weapon].id], lv: P.level(prog), su: p.guns[p.weapon].sup ? 1 : 0, lb: state === 'lobby' ? 1 : 0, rd: state === 'lobby' && net.ready ? 1 : 0, ov: state === 'over' ? 1 : 0,
     z: game === 'zombies' && zHost() ? zombieState() : undefined });
 }
 function startOnline(code) {
@@ -1740,7 +1750,10 @@ function startOnline(code) {
       updateNetStatus();
     },
     onLeave: id => { for (const r of [...net.remotes.values()]) if (id === null || r.peer === id) removeRemote(r); updateNetStatus(); },
-    onStatus: s => { net.status = s; updateNetStatus(); },
+    onStatus: s => {
+      net.status = s; updateNetStatus();
+      if (s === 'busy') { toMenu(); toast('That room has a match in progress. Try again when it ends.'); }
+    },
   });
   netSend(true);
 }
@@ -1761,7 +1774,7 @@ function applyRemote(id, s, seat) {
   if (typeof id !== 'string' || !/^[a-z0-9]{4,16}$/.test(id) || id === net.myPeer) return;
   let r = net.remotes.get(id);
   if (s.v !== 1 || !Array.isArray(s.p)) { if (r) removeRemote(r); return; }
-  if (state === 'lobby' && id === net.host && s.lb !== 1 && (s.m | 0) > net.lobbyFrom) { beginMatch(s.m | 0, false); }
+  if (state === 'lobby' && net.ready && id === net.host && s.lb !== 1 && (s.m | 0) > net.lobbyFrom) { beginMatch(s.m | 0, false); }
   if (!r) {
     const name = cleanName(s.n) || 'Player', color = /^#[0-9a-f]{6}$/i.test(s.c) ? s.c : '#cccccc';
     r = newEntity(name, color, false);
@@ -1778,7 +1791,7 @@ function applyRemote(id, s, seat) {
   r.target.set(clamp(num(s.p[0]), -pl, pl), clamp(num(s.p[1]), 0, 120), clamp(num(s.p[2]), -pl, pl));
   r.tyaw = num(s.yw); r.pitch = clamp(num(s.pt), -1.5, 1.5); r.weapon = clamp(s.w | 0, 0, WEAPONS.length - 1);
   r.hp = num(s.hp); r.kills = Math.max(0, s.k | 0); r.deaths = Math.max(0, s.d | 0); r.m = s.m | 0;
-  r.lobby = s.lb === 1; r.dead = s.dd === 1; // lb: waiting in the lobby; a: in play right now; dd: actually down (paused players are neither)
+  r.lobby = s.lb === 1; r.ready = s.rd === 1; r.over = s.ov === 1; r.dead = s.dd === 1; // lb: waiting in the lobby; a: in play right now; dd: actually down (paused players are neither)
   r.crouch = clamp(num(s.cr), 0, 1); r.slideK = clamp(num(s.sl), 0, 1); r.su = s.su === 1;
   // their look: gun camo follows the weapon in hand; the tag shows their level
   const sk = cleanUniform(s.sk), cm = cleanCamo(s.cm), lv = cleanLevel(s.lv);
@@ -1946,7 +1959,8 @@ function setHost(id) {
 }
 // the host keeps the bot count right: the room's number of bots, or in team deathmatch enough to fill both sides
 function updateRoster() {
-  if (!botHost() || !versus() || state === 'menu' || now < net.rosterAt) return;
+  // (a timer left over from far ahead, if the clock ever goes back, doesn't hold the roster up)
+  if (!botHost() || !versus() || state === 'menu' || (now < net.rosterAt && net.rosterAt - now <= 1)) return;
   net.rosterAt = now + 1;
   if (oneLife() && state !== 'lobby' && !FLIGHT.on) return; // battle royale: the bots are set while the blimp flies, then never change
   const c = cfg(), hum = humansInMatch(), want = new Map();
@@ -1967,6 +1981,7 @@ function updateNetStatus() {
   el.hidden = false;
   const n = net.remotes.size, rm = `Room ${settings.room} · ${MAPS[net.map || currentMap]} · ${GAMES[game]} · `;
   el.textContent = net.status === 'full' ? `${rm}room is full, quit and try another code`
+    : net.status === 'busy' ? `${rm}match in progress`
     : net.status !== 'ready' ? `${rm}connecting…`
     : n ? `${rm}${n + 1} players`
     : `${rm}waiting for friends (Esc → Copy invite link)`;
@@ -2014,8 +2029,8 @@ async function refreshRooms() {
     info.textContent = `${GAMES[r.game] || r.game}${r.game === 'tdm' ? ` ${r.ts}v${r.ts}` : ''}${r.game === 'br' && r.sq > 1 ? ` ${SQUAD_NAMES[r.sq] || ''}` : ''} · ${MAPS[r.map] || r.map}${r.bots && r.game !== 'tdm' ? ` · ${r.bots} bots` : ''}`;
     what.append(name, info);
     const count = document.createElement('span'); count.className = 'count'; count.textContent = `${r.players}/${r.max}`;
-    const btn = document.createElement('button'); btn.className = 'btn ghost small'; btn.type = 'button'; btn.textContent = r.players >= r.max ? 'Full' : 'Join';
-    btn.disabled = r.players >= r.max; btn.addEventListener('click', () => joinCode(r.code));
+    const btn = document.createElement('button'); btn.className = 'btn ghost small'; btn.type = 'button'; btn.textContent = r.busy ? 'In progress' : r.players >= r.max ? 'Full' : 'Join';
+    btn.disabled = r.busy || r.players >= r.max; if (r.busy) row.classList.add('full'); btn.addEventListener('click', () => joinCode(r.code));
     row.append(what, count, btn); box.append(row);
   }
   roomsTimer = setTimeout(refreshRooms, 4000);
@@ -2935,6 +2950,8 @@ function beginMatch(m, mine) {
   for (const e of ents) if (e.ai) { e.kills = e.deaths = 0; respawn(e); }
   respawn(player); refreshVM(); endSpec();
   leaderCache = null; updateScoreTop(); $('death').hidden = true;
+  net.rosterAt = 0; // the host seats this match's bots right away (they board the blimp with everyone)
+  if (mine && oneLife()) sendLock(true); // only does anything for the leader
   if (mine || plWorks === false) { setState('playing'); netSend(true); if (plWorks !== false) requestLock(); return; }
   setState('paused'); netSend(true);
   $('pauseTitle').textContent = 'Match started'; $('resumeBtn').textContent = 'Play';
@@ -2952,6 +2969,7 @@ const LB = { scene: new THREE.Scene(), cam: new THREE.PerspectiveCamera(35, 1, 0
 }
 function enterLobby() {
   net.lobbyFrom = net.m; setState('lobby'); netSend(true);
+  sendLock(false);
 }
 // the room's players in groups: squads in battle royale, Blue and Red in team deathmatch, otherwise one line
 function lobbyGroups() {
@@ -2997,7 +3015,7 @@ function renderLobbyUI(groups) {
   if (squadsOn()) bits.push(SQUAD_NAMES[c.sq]); else if (teamsOn()) bits.push(`${c.ts}v${c.ts}`);
   if (oneLife() && c.hok) bits.push(`+${c.hok} HP per kill`);
   setText('lobbyInfo', bits.join(' \u00b7 '));
-  const listKey = JSON.stringify([isHost, net.host, game, cfg().sq, groups.map(g => [g.t, g.list.map(e => [e.peer, e.name, e.color, e.lobby, e.lv])])]);
+  const listKey = JSON.stringify([isHost, net.host, game, cfg().sq, groups.map(g => [g.t, g.list.map(e => [e.peer, e.name, e.color, e.lobby, e.ready, e.lv]), net.ready])]);
   const box = $('lobbyList');
   if (box.dataset.k !== listKey) { box.dataset.k = listKey; box.textContent = ''; } else groups = [];
   for (const g of groups) {
@@ -3009,7 +3027,7 @@ function renderLobbyUI(groups) {
       const n = document.createElement('b'); n.textContent = e === player ? `${e.name} (you)` : e.name;
       const tag = document.createElement('span');
       const id = e === player ? net.myPeer : e.peer;
-      tag.textContent = [id === net.host ? 'Leader' : '', e === player || e.lobby ? 'Ready' : 'In a match', `Lv ${e === player ? P.level(prog) : e.lv || 1}`].filter(Boolean).join(' \u00b7 ');
+      tag.textContent = [id === net.host ? 'Leader' : '', e === player ? (net.ready || isHost ? 'Ready' : 'Not ready') : !e.lobby ? 'In a match' : e.ready || id === net.host ? 'Ready' : 'Not ready', `Lv ${e === player ? P.level(prog) : e.lv || 1}`].filter(Boolean).join(' \u00b7 ');
       row.append(dot, n, tag);
       if (isHost && e !== player) { // hand the lead to them
         const b = document.createElement('button'); b.type = 'button'; b.className = 'btn ghost small lbLead'; b.textContent = 'Make leader';
@@ -3021,10 +3039,15 @@ function renderLobbyUI(groups) {
     box.append(col);
   }
   const n = 1 + net.remotes.size;
+  // battle royale: the leader can't start the next one while anyone is still alive in the last one
+  const still = oneLife() ? [...net.remotes.values()].filter(r => !r.lobby && !r.dead && !r.over).length : 0;
   setText('lobbyMsg', net.status !== 'ready' ? 'Connecting\u2026'
+    : isHost && still ? `${still} player${still > 1 ? 's are' : ' is'} still alive in the last match. You can start when it ends.`
     : isHost ? (n === 1 ? 'Waiting for friends. Send them the invite link, or start now: bots fill the empty seats.' : `${n} players here. Bots fill the empty seats. Start when everyone's in.`)
+    : !net.ready ? `Not ready: you'll sit out the next match until you press Ready.`
     : `Waiting for ${hostR ? hostR.name : 'the host'} to start the match.`);
-  $('lobbyStart').hidden = !isHost; $('lobbyStart').disabled = net.status !== 'ready';
+  $('lobbyStart').hidden = !isHost; $('lobbyStart').disabled = net.status !== 'ready' || still > 0;
+  $('lobbyReady').hidden = isHost; $('lobbyReady').textContent = net.ready ? 'Not ready' : 'Ready';
   renderLobbySet(isHost);
 }
 // the leader's controls: game, map and that game's options. Each change goes to the server, which tells everyone.
@@ -3057,11 +3080,12 @@ function renderLobbySet(isHost) {
   pick('Who can join', [['true', 'Public: listed'], ['false', 'Private: code only']], String(net.pub !== false), v => send({ pub: v === 'true' }));
 }
 $('lobbyStart').addEventListener('click', () => { if (state === 'lobby') playAgain(); });
+$('lobbyReady').addEventListener('click', () => { net.ready = !net.ready; netSend(true); renderLobbyUI(lobbyGroups()); });
 $('lobbyLeave').addEventListener('click', () => toMenu());
 $('lobbyInvite').addEventListener('click', () => copyInvite(settings.room, $('lobbyInvite'), $('lobbyInviteOut')));
 $('lobbyBtn').addEventListener('click', () => { if (mode === 'online') enterLobby(); });
 function endGame(winner) {
-  setState('over');
+  setState('over'); sendLock(false);
   const won = winner.isPlayer || (alliesOn() && winner.team === player.team);
   $('overTitle').textContent = winner.isPlayer ? 'You win!' : won ? (squadsOn() ? 'Your squad wins!' : 'Your team wins!') : `${winner.name} wins`;
   endSpec();
@@ -3151,8 +3175,8 @@ $('nameIn').value = settings.name;
 $('nameIn').addEventListener('keydown', e => { if (e.key === 'Enter' && !$('playBtn').hidden) $('playBtn').click(); });
 $('playBtn').addEventListener('click', () => (settings.mode === 'online' ? createRoom() : startGame()));
 $('againBtn').addEventListener('click', playAgain);
-$('deathAgain').addEventListener('click', playAgain);
-$('deathMenu').addEventListener('click', toMenu);
+$('deathAgain').addEventListener('click', () => (mode === 'online' ? deathToLobby(true) : playAgain()));
+$('deathMenu').addEventListener('click', () => (mode === 'online' ? deathToLobby(false) : toMenu()));
 $('menuBtn').addEventListener('click', toMenu);
 $('quitBtn').addEventListener('click', toMenu);
 $('ctrlBtn').addEventListener('click', () => openControls('menu'));
@@ -3272,7 +3296,8 @@ function frame(t) {
 if (location.hostname === 'localhost') window.__spud = { player, net, ents, prog, Z, AIM, settings, tryFire, teamScore, storm,
   CH, FLIGHT, useKey, startHeal, get LIMIT() { return LIMIT; },
   applyRemote: (id, s, seat) => applyRemote(id, s, seat), renderLobbyUI: () => renderLobbyUI(lobbyGroups()), enterLobby: () => enterLobby(),
-  camAt: (x, y, z, tx, ty, tz) => { camHold = true; camera.position.set(x, y, z); camera.lookAt(tx, ty, tz); }, boxes, STAIRS, PADS, SPAWNS, startGame, toMenu: () => toMenu(), get game() { return game; }, get state() { return state; }, get now() { return now; } };
+  camAt: (x, y, z, tx, ty, tz) => { camHold = true; camera.position.set(x, y, z); camera.lookAt(tx, ty, tz); }, boxes, STAIRS, PADS, SPAWNS, startGame, toMenu: () => toMenu(), get game() { return game; }, get state() { return state; }, get now() { return now; },
+  kill: (t, by = player) => kill(t, by, "Pistol", false), squadmates: () => squadmates(), winnerNow: () => winnerNow() };
 resize();
 dressVM(); updateProfile();
 setMap(settings.map);

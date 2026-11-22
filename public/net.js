@@ -19,7 +19,7 @@ export function joinRoom(code, id, opts, { onPeer, onLeave, onStatus, onRoom, on
       else if (m.t === 'bye') onLeave(m.k);
       else if (m.t === 'room') onRoom(m); // what the room is playing: map, game, cfg, my team, and who the host is
       else if (m.t === 'host') onHost(m.k);
-      else if (m.t === 'full') { dead = true; onStatus('full'); }
+      else if (m.t === 'full' || m.t === 'busy') { dead = true; onStatus(m.t); } // busy: a battle royale is under way
     };
     ws.onclose = () => {
       if (dead) return;
