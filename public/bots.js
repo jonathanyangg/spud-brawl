@@ -195,7 +195,7 @@ export function updateBot(b, dt) {
     ai.lastPos.copy(b.pos); ai.stuckAt = now + 0.7;
   }
 
-  const speed = 6.4 * (stunned ? 0.45 : 1) * (b.useT ? 0 : 1), k = b.launched ? 0 : (b.onGround ? 10 * grip(b) : 2.5) * dt;
+  const speed = 6.4 * (w.speed || 1) * (stunned ? 0.45 : 1) * (b.useT ? 0 : 1), k = b.launched ? 0 : (b.onGround ? 10 * grip(b) : 2.5) * dt;
   b.vel.x += (wish.x * speed - b.vel.x) * Math.min(1, k);
   b.vel.z += (wish.z * speed - b.vel.z) * Math.min(1, k);
   moveEntity(b, dt);
