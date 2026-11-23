@@ -36,12 +36,14 @@ import {
   applyInvite, enterLobby, initMenu, inviteLink, LB, lobbyGroups, outOfMatch, readyOutFrame, rebinding, renderLobbyUI, stopRebind,
   toggleReadyOut, updateLobby, updateModeUI, updateReadyOut
 } from './menu.js';
+import { initInput, keys, plWorks, releaseAim, requestLock, updatePlayer, zoomed } from './player.js';
+export { plWorks, relockAfterDeath, requestLock, zoomed } from './player.js';
 export { outOfMatch, readyHere, readyOutFrame } from './menu.js';
 export { hostPeer, nearestZombie, resetZombies, syncZombies, Z, zHost, zLeft, zombieState } from './modes/zombies.js';
 export { AIM } from './modes/aim.js';
 
 const UP = new V3(0, 1, 0);
-const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+export const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // ---------- settings ----------
 export const settings = { name: 'Soldier', diff: 'normal', bots: 5, sens: 1, adsSens: 1, fov: 75, vol: 1, mode: 'bots', game: 'ffa', room: 'brawl', map: 'depot', music: true,
@@ -67,7 +69,7 @@ if (settings.binds && typeof settings.binds === 'object') {
 }
 settings.bindsV = 2;
 
-const bound = a => keys[binds[a]] === true;
+export const bound = a => keys[binds[a]] === true;
 export function actionFor(code) { for (const k in binds) if (binds[k] === code) return k; return null; }
 
 // ---------- renderer / scene ----------
@@ -78,7 +80,7 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.autoClear = false;
 host.appendChild(renderer.domElement);
-const canvas = renderer.domElement;
+export const canvas = renderer.domElement;
 
 export const scene = new THREE.Scene(); // sky and fog come from the map
 export const camera = new THREE.PerspectiveCamera(75, 1, 0.05, 300);
@@ -159,7 +161,7 @@ export const bodyC = (e, out = new V3()) => out.set(e.pos.x, e.pos.y + 1.25 * po
 function overlaps(e, b, h = H * poseK(e)) {
   return e.pos.x + R > b.min.x && e.pos.x - R < b.max.x && e.pos.z + R > b.min.z && e.pos.z - R < b.max.z && e.pos.y + h > b.min.y && e.pos.y < b.max.y;
 }
-const canStand = e => !boxes.some(b => overlaps(e, b, H));
+export const canStand = e => !boxes.some(b => overlaps(e, b, H));
 // Moon Knives plays in low gravity
 export const grav = () => (game === 'moon' ? G * 0.38 : G);
 export function moveEntity(e, dt) {
@@ -522,7 +524,7 @@ export function startReload(e) {
   if (e.rlStop) e.rlStop();
   e.rlStop = sfxReload(w.id, w.reload, e.isPlayer ? 1 : distVol(e.pos), w.mag - e.ammo[e.weapon]);
 }
-function switchWeapon(e, i) {
+export function switchWeapon(e, i) {
   if (i === e.weapon || i < 0 || i >= e.guns.length) return;
   e.prevWeapon = e.weapon; e.weapon = i; e.reloading = false; e.useT = null;
   e.nextShot = Math.max(e.nextShot, now + 0.3);
@@ -698,7 +700,7 @@ function knockDown(t, src, wname, head) {
   t.useT = null; t.rev = null; t.reloading = false; t.sprint = false; t.slide = 0; t.crouchOn = false;
   if (t.vehicle) exitVehicle(t);
   addFeed(by, t, wname, head, true);
-  if (t.isPlayer) { zoomed = false; $('scope').hidden = true; closeInv(false); shake = Math.max(shake, 0.25); toast('Knocked down: crawl to your squad'); }
+  if (t.isPlayer) { releaseAim(false); $('scope').hidden = true; closeInv(false); shake = Math.max(shake, 0.25); toast('Knocked down: crawl to your squad'); }
   if (by && by.isPlayer) { sfx.kill(); toast('Knocked <em></em>', t.name, head); }
   if (mode === 'online' && (t.isPlayer || t.ai)) netEvent('kn', idOf(t), idOf(by), WNAMES.indexOf(wname), head ? 1 : 0);
   scoresChanged();
@@ -931,7 +933,7 @@ function poseHealVM(u) {
   }
 }
 // ---------- first-person view model ----------
-const vm = { root: new THREE.Group(), guns: [], kick: 0, switchT: 0, flashUntil: 0, swayX: 0, swayY: 0, bob: 0, ads: 0, spr: 0 };
+export const vm = { root: new THREE.Group(), guns: [], kick: 0, switchT: 0, flashUntil: 0, swayX: 0, swayY: 0, bob: 0, ads: 0, spr: 0 };
 vmScene.add(vm.root);
 function part(g, w, h, d, x, y, z, color, rx = 0) {
   const m = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color })); m.scale.set(w, h, d); m.position.set(x, y, z); m.rotation.x = rx; g.add(m); return m;
@@ -1050,221 +1052,17 @@ function muzzlePos(e) {
   return muzzleOf(e);
 }
 
-// ---------- input ----------
-const keys = {};
-export let locked = false, plWorks = null, fireLatch = false, triggerUsed = false, zoomed = false, crouchTap = false;
-export function requestLock() {
-  // some views neither grant nor refuse the lock; fall back to drag-to-aim if nothing happens
-  setTimeout(() => { if (!locked && plWorks === null) plWorks = false; }, 1200);
-  try {
-    const r = canvas.requestPointerLock();
-    if (r && r.catch) r.catch(() => { if (plWorks !== true) plWorks = false; else $('pauseMsg').textContent = 'Click Resume again to grab the mouse.'; });
-  } catch (e) { plWorks = false; }
-}
-document.addEventListener('pointerlockchange', () => {
-  locked = document.pointerLockElement === canvas;
-  if (locked) { plWorks = true; if (state === 'paused') setState('playing'); }
-  else if (state === 'playing' && !invOpen && player.alive) { setState('paused'); } // dead: the mouse is free for the death screen buttons
-});
-document.addEventListener('pointerlockerror', () => { if (plWorks !== true) plWorks = false; });
-// back from the dead in a bot game: take the mouse again (or ask for a click if the browser says no)
-export function relockAfterDeath() {
-  if (locked || plWorks === false || state !== 'playing') return;
-  requestLock();
-  setTimeout(() => { if (!locked && state === 'playing' && player.alive) toast('Click to keep playing'); }, 400);
-}
-document.addEventListener('mousemove', e => {
-  if (state === 'playing' && MM.big && locked) { moveMapCursor(e.movementX, e.movementY); return; } // the full map's cursor, not the view
-  if (state !== 'playing' || !player.alive) return;
-  if (locked || (plWorks === false && e.buttons)) {
-    const s = settings.sens * 0.0022 * (zoomed ? camera.fov / settings.fov * settings.adsSens : 1) * (now < player.stunUntil ? 0.4 : 1);
-    player.yaw -= e.movementX * s; player.pitch = clamp(player.pitch - e.movementY * s, -1.45, 1.45);
-    vm.swayX = clamp(vm.swayX - e.movementX * 0.0004, -0.04, 0.04); vm.swayY = clamp(vm.swayY + e.movementY * 0.0004, -0.04, 0.04);
-  }
-});
-canvas.addEventListener('mousedown', e => {
-  if (state !== 'playing') return;
-  initAudio();
-  if (invOpen) { closeInv(); return; }
-  if (MM.big && locked && e.button === 0) { pingMap(); return; } // a click on the full map pings there
-  if (!player.alive && mode !== 'online') return;
-  if (!locked && plWorks !== false) { requestLock(); return; }
-  pressCode('Mouse' + e.button);
-});
-canvas.addEventListener('auxclick', e => e.preventDefault());
-document.addEventListener('mouseup', e => { keys['Mouse' + e.button] = false; });
-// a pressed control: movement is read from `keys` each frame; one-shot actions fire here
-function pressCode(code) {
-  keys[code] = true;
-  const a = actionFor(code);
-  if (a === 'shoot') { fireLatch = true; triggerUsed = false; }
-  if (a === 'scores') { buildTable($('boardTbl')); $('board').hidden = false; }
-  if (a === 'map') { toggleBigMap(); return; } // these two work dead too, while you spectate
-  if (a === 'ping') { if (MM.big) pingMap(); else pingAim(); return; }
-  if (!player.alive || !a) return;
-  if (player.drop) { if (a === 'jump') dropPress(player); return; }
-  if (player.knock) return; // down: crawling is all you can do
-  if (a === 'w1') switchWeapon(player, slotIdx(player, 0));
-  else if (a === 'w2') switchWeapon(player, slotIdx(player, 1));
-  else if (a === 'w3') switchWeapon(player, slotIdx(player, 2));
-  else if (a === 'w4') switchWeapon(player, slotIdx(player, 3));
-  else if (a === 'use') useKey(player);
-  else if (a === 'dropGun') dropGun(player, player.weapon);
-  else if (a === 'bandage' || a === 'medkit') startHeal(player, a);
-  else if (a === 'inv') openInv();
-  else if (a === 'swap') switchWeapon(player, player.prevWeapon);
-  else if (a === 'slotL') moveSlot(player, -1);
-  else if (a === 'slotR') moveSlot(player, 1);
-  else if (a === 'reload') startReload(player);
-  else if (a === 'nade') throwNade(player);
-  else if (a === 'crouch') crouchTap = true;
-}
-canvas.addEventListener('contextmenu', e => e.preventDefault());
-document.addEventListener('wheel', e => { // next or previous gun, in slot order
-  if (state !== 'playing' || !player.alive || player.drop || player.knock || invOpen) return;
-  const order = slotOrder(player), n = order.length, k = order.indexOf(player.weapon);
-  switchWeapon(player, order[(k + (e.deltaY > 0 ? 1 : n - 1)) % n]);
-}, { passive: true });
-// Ctrl+W/T/N can't be blocked in a page, so a crouch bound to Ctrl could close the tab: ask first while in a match
-addEventListener('beforeunload', e => { if (state === 'playing') e.preventDefault(); });
-addEventListener('blur', () => { for (const k in keys) keys[k] = false; $('board').hidden = true; });
-document.addEventListener('keydown', e => {
-  if (rebinding || (e.target && e.target.tagName === 'INPUT')) return;
-  if (e.code === binds.mute && !e.repeat) { toast(toggleMute() ? 'Sound off' : 'Sound on'); }
-  if (state !== 'playing') return;
-  if (e.code.startsWith('Arrow') || actionFor(e.code)) e.preventDefault();
-  if (invOpen) {
-    if (!e.repeat && (e.code === binds.inv || e.code === 'Escape')) { e.preventDefault(); closeInv(); return; }
-    const a = actionFor(e.code);
-    if (['fwd', 'back', 'left', 'right', 'jump', 'sprint', 'crouch'].includes(a)) keys[e.code] = true;
-    else if (!e.repeat && (a === 'bandage' || a === 'medkit')) startHeal(player, a);
-    return;
-  }
-  // Esc pauses. With the mouse captured the browser takes Esc itself (see pointerlockchange); this covers the
-  // times it isn't: dead with the mouse freed for the death buttons, or after the browser refused to recapture it
-  if (e.code === 'Escape' && !e.repeat && !locked) { e.preventDefault(); setState('paused'); return; }
-  if (e.code === 'Enter' && !e.repeat && !player.alive && mode !== 'online') { e.preventDefault(); playAgain(); return; }
-  if (e.code === 'Enter' && !e.repeat && outOfMatch() && state !== 'over') { e.preventDefault(); toggleReadyOut(); return; }
-  if (e.code === binds.jump && !e.repeat && !player.alive && spec.who && state === 'playing') { e.preventDefault(); nextSpec(); return; }
-  if (e.repeat) return;
-  pressCode(e.code);
-});
-document.addEventListener('keyup', e => { keys[e.code] = false; if (e.code === binds.scores) $('board').hidden = true; });
+// the camera: shake from hits and blasts, and where you died and who did it (set by combat, read by player.js)
+export const deathPos = new V3();
+export let killer = null, shake = 0;
 
-// ---------- player update ----------
-const deathPos = new V3(); let killer = null, shake = 0, stepD = 0, airT = 0, wasGround = true;
-function updatePlayer(dt) {
-  const p = player;
-  if (!p.alive) {
-    const left = Math.ceil(p.respawnAt - now);
-    $('deathCount').textContent = game === 'zombies' ? 'Back next wave' : oneLife() ? `Out \u00b7 ${brAlive().length} left` : 'Back in ' + Math.max(1, left);
-    if (oneLife() && now > p.diedAt + 2.5 && spectate(dt)) return; // a moment on your killer, then your squad
-    camera.position.lerp(_o.copy(deathPos).add(new V3(0, 3, 0)), 1 - Math.pow(0.1, dt));
-    if (killer && killer.alive) camera.lookAt(killer.pos.x, killer.pos.y + 1, killer.pos.z);
-    if (now >= p.respawnAt) { respawn(p); $('death').hidden = true; refreshVM(); relockAfterDeath(); }
-    return;
-  }
-  const turn = 2.4 * dt;
-  if (keys.ArrowLeft) p.yaw += turn; if (keys.ArrowRight) p.yaw -= turn;
-  if (keys.ArrowUp) p.pitch = clamp(p.pitch + turn, -1.45, 1.45); if (keys.ArrowDown) p.pitch = clamp(p.pitch - turn, -1.45, 1.45);
-  const f = (bound('fwd') ? 1 : 0) - (bound('back') ? 1 : 0), s = (bound('right') ? 1 : 0) - (bound('left') ? 1 : 0);
-  const sy = Math.sin(p.yaw), cy = Math.cos(p.yaw);
-  const wish = new V3(-sy * f + cy * s, 0, -cy * f - sy * s);
-  if (wish.lengthSq() > 0) wish.normalize();
-  if (p.drop) { zoomed = false; fireLatch = false; updateDrop(p, dt, wish); dropCamera(p, dt); return; }
-  hideSelf();
-  if (p.vehicle) { // at the wheel: drive, look round, nothing else
-    zoomed = false; fireLatch = false; crouchTap = false;
-    driveVehicle(p, dt, f, s);
-    camera.position.set(p.pos.x, p.pos.y + EYE * poseK(p), p.pos.z);
-    camera.rotation.set(p.pitch, p.yaw, 0);
-    if (shake > 0 && !reduceMotion) camera.position.add(new V3(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(shake * 0.3));
-    return;
-  }
-  if (p.knock) return crawl(p, dt, wish);
-  const w = p.guns[p.weapon], firing = bound('shoot') || fireLatch;
-  zoomed = bound('scope') && !p.reloading && w.kind !== 'melee';
-
-  if (firing && p.sprint) { p.nextShot = Math.max(p.nextShot, now + 0.1); p.sprintBlock = now + 0.35; }
-  // crouch toggles; crouch while sprinting slides. Crouch again or jump mid-slide to cancel it:
-  // you stand straight back up into a sprint and keep the slide's speed.
-  if (crouchTap) {
-    if (p.slide > 0) endSlide(p, false);
-    else if (p.sprint && p.onGround && now >= p.slideReady) {
-      p.slide = MOVE.slideTime; p.sprint = false; p.crouchOn = false;
-      const hv = new V3(p.vel.x, 0, p.vel.z);
-      p.slideDir.copy(hv.lengthSq() > 0.01 ? hv.normalize() : wish);
-      const v0 = Math.max(MOVE.slide, Math.hypot(p.vel.x, p.vel.z));
-      p.vel.x = p.slideDir.x * v0; p.vel.z = p.slideDir.z * v0;
-      sfx.slide();
-    } else p.crouchOn = !p.crouchOn;
-    crouchTap = false;
-  }
-  // sprint: hold while moving forward. Firing drops out of sprint, with a short delay before the first shot.
-  p.sprint = bound('sprint') && f > 0 && !zoomed && !firing && p.slide <= 0 && now >= p.sprintBlock;
-  if (p.sprint && p.crouchOn && canStand(p)) p.crouchOn = false;
-
-  if (p.slide > 0) {
-    p.slide -= dt;
-    if (bound('jump') && p.onGround) { endSlide(p, false); p.vel.y = JUMP; p.onGround = false; }
-    else if (p.slide <= 0) endSlide(p, true);
-  }
-  let target = p.slide > 0 || p.crouchOn ? 1 : 0;
-  if (!target && p.crouch > 0.01 && !canStand(p)) target = 1; // no room to stand up
-  p.crouch += (target - p.crouch) * Math.min(1, dt * 12);
-  p.slideK += ((p.slide > 0 ? 1 : 0) - p.slideK) * Math.min(1, dt * 14);
-
-  if (p.slide > 0) {
-    // ride the slide's momentum, fading to crouch speed, with a little steering
-    const v = MOVE.crouch + (MOVE.slide - MOVE.crouch) * (p.slide / MOVE.slideTime);
-    if (wish.lengthSq() > 0) p.slideDir.lerp(wish, Math.min(1, dt * 1.5)).normalize();
-    const k = Math.min(1, (p.onGround ? 6 * grip(p) : 1) * dt);
-    p.vel.x += (p.slideDir.x * v - p.vel.x) * k; p.vel.z += (p.slideDir.z * v - p.vel.z) * k;
-  } else if (p.launched) {
-    p.vel.x += wish.x * 3 * dt; p.vel.z += wish.z * 3 * dt; // flying off a jump pad: nudge, don't brake
-  } else {
-    let speed = (zoomed ? MOVE.ads : p.sprint ? MOVE.sprint : MOVE.walk) * (w.speed || 1) * (now < p.stunUntil ? 0.5 : 1);
-    if (target) speed = Math.min(speed, MOVE.crouch); // by intent, so standing back up isn't slowed
-    const k = Math.min(1, (p.onGround ? 12 * grip(p) : 3) * dt);
-    p.vel.x += (wish.x * speed - p.vel.x) * k; p.vel.z += (wish.z * speed - p.vel.z) * k;
-  }
-  if (bound('jump') && p.onGround) { if (p.crouchOn && canStand(p)) p.crouchOn = false; p.vel.y = JUMP; p.onGround = false; }
-  moveEntity(p, dt);
-  if (firing && (w.auto || !triggerUsed) && tryFire(p)) triggerUsed = true;
-  fireLatch = false; // a tap shorter than one frame still fires
-  if (!oneLife() && now - p.lastHurt > 5 && p.hp < 100) p.hp = Math.min(100, p.hp + 12 * dt);
-
-  const sp = Math.hypot(p.vel.x, p.vel.z);
-  if (p.onGround) vm.bob += dt * sp * 1.6;
-  // your footsteps: one per stride, quieter crouched, none while sliding; a thud when you land
-  if (p.onGround && !wasGround && airT > 0.35) sfx.land(Math.min(1, airT));
-  airT = p.onGround ? 0 : airT + dt; wasGround = p.onGround;
-  if (p.onGround && p.slide <= 0 && sp > 1.2) {
-    stepD += sp * dt;
-    if (stepD >= (p.sprint ? 2.5 : 1.9)) { stepD = 0; sfx.step(p.crouch > 0.5 ? 0.3 : p.sprint ? 0.85 : 0.6); }
-  } else stepD = Math.min(stepD, 1.2);
-  const bobY = reduceMotion ? 0 : Math.sin(vm.bob * 2) * 0.04 * Math.min(1, sp / 6);
-  camera.position.set(p.pos.x, p.pos.y + EYE * poseK(p) + bobY, p.pos.z);
-  camera.rotation.set(p.pitch, p.yaw, reduceMotion ? 0 : p.slideK * 0.07);
-  if (shake > 0 && !reduceMotion) camera.position.add(new V3(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(shake * 0.3));
-}
-
-// knocked down: crawl, look round, nothing else
-function crawl(p, dt, wish) {
-  zoomed = false; fireLatch = false; crouchTap = false; p.sprint = false; p.slide = 0; p.slideK = 0; p.crouch = 1;
-  const k = Math.min(1, (p.onGround ? 10 : 3) * dt);
-  p.vel.x += (wish.x * KNOCK.speed - p.vel.x) * k; p.vel.z += (wish.z * KNOCK.speed - p.vel.z) * k;
-  moveEntity(p, dt);
-  camera.position.set(p.pos.x, p.pos.y + EYE * poseK(p), p.pos.z);
-  camera.rotation.set(p.pitch, p.yaw, reduceMotion ? 0 : 0.1);
-  if (shake > 0 && !reduceMotion) camera.position.add(new V3(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(shake * 0.3));
-}
+initInput(); // player.js's wiring, here where it always ran
 
 // ---------- spectating your squad ----------
 export const spec = { who: null };
 export const isUp = e => (e.remote && !e.netbot ? !e.dead && e.m === net.m : e.alive);
 export const squadmates = () => (squadsOn() && player.team !== undefined ? ents.filter(e => e !== player && !e.zombie && sameTeam(e, player) && isUp(e)) : []);
-function spectate(dt) {
+export function spectate(dt) {
   const mates = squadmates();
   if (!mates.length) { if (spec.who) endSpec(true); return false; }
   if (!mates.includes(spec.who)) { spec.who = mates[0]; $('death').hidden = true; $('spec').hidden = false; }
@@ -1281,7 +1079,7 @@ function spectate(dt) {
   camera.lookAt(e.pos.x + _f.x * 6, e.pos.y + 1.4, e.pos.z + _f.z * 6);
   return true;
 }
-function nextSpec() {
+export function nextSpec() {
   const mates = squadmates(); if (mates.length < 2) return;
   spec.who = mates[(mates.indexOf(spec.who) + 1) % mates.length];
 }
@@ -1308,8 +1106,8 @@ $('specAgain').addEventListener('click', () => playAgain());
 // on the blimp the camera sits behind it and you look around; once you jump it follows behind you so you see
 // yourself fall and glide, and on landing it's your own eyes again
 let selfMesh = null;
-function hideSelf() { if (selfMesh) selfMesh.visible = false; }
-function dropCamera(p, dt = 0) {
+export function hideSelf() { if (selfMesh) selfMesh.visible = false; }
+export function dropCamera(p, dt = 0) {
   fwdVec(p.yaw, p.pitch, _f);
   if (p.drop && p.drop.stage === 'ride' && FLIGHT.mesh) {
     hideSelf();
@@ -1336,7 +1134,7 @@ export function slotIdx(e, s) { // the gun in slot s, or -1
   if (!oneLife() || !e.isPlayer) return s < e.guns.length ? s : -1;
   fixSlots(e); return e.guns.findIndex(g => g.slot === s);
 }
-const slotOrder = e => [...Array(MAX_SLOTS).keys()].map(s => slotIdx(e, s)).filter(i => i >= 0);
+export const slotOrder = e => [...Array(MAX_SLOTS).keys()].map(s => slotIdx(e, s)).filter(i => i >= 0);
 // put gun i into slot s, trading places with whatever is there
 function moveToSlot(e, i, s) {
   if (!oneLife() || !e.isPlayer) return swapSlots(e, i, s);
@@ -1345,7 +1143,7 @@ function moveToSlot(e, i, s) {
   g.slot = s;
 }
 // move the gun in your hands one slot left or right (the knife can move too)
-function moveSlot(e, dir) { if (!oneLife()) return; fixSlots(e); moveToSlot(e, e.weapon, e.guns[e.weapon].slot + dir); }
+export function moveSlot(e, dir) { if (!oneLife()) return; fixSlots(e); moveToSlot(e, e.weapon, e.guns[e.weapon].slot + dir); }
 function swapSlots(e, i, j) {
   if (i === j || i < 0 || j < 0 || i >= e.guns.length || j >= e.guns.length) return;
   [e.guns[i], e.guns[j]] = [e.guns[j], e.guns[i]]; [e.ammo[i], e.ammo[j]] = [e.ammo[j], e.ammo[i]];
@@ -1358,15 +1156,15 @@ function swapSlots(e, i, j) {
 // ---------- inventory (battle royale) ----------
 // opens over the game (which keeps running) and frees the mouse: guns you can drag into a new order or click to hold,
 // with their numbers on hover, and the ammo and heals you carry
-let invOpen = false, invKey = '', invDrag = -1;
-function openInv() {
+export let invOpen = false, invKey = '', invDrag = -1;
+export function openInv() {
   const p = player;
   if (!oneLife() || !p.alive || p.drop || state !== 'playing') return;
   invOpen = true; invKey = ''; renderInv(); $('inv').hidden = false;
-  fireLatch = false; zoomed = false;
+  releaseAim(true);
   if (document.pointerLockElement) document.exitPointerLock();
 }
-function closeInv(relock = true) {
+export function closeInv(relock = true) {
   if (!invOpen) return;
   invOpen = false; $('inv').hidden = true; $('invTip').hidden = true; invDrag = -1;
   if (relock && state === 'playing' && plWorks !== false) requestLock();
@@ -1450,7 +1248,7 @@ function updateInv() {
   if (invDrag < 0 && invSig() !== invKey) renderInv();
 }
 // natural end: you stay crouched; cancelled: you stand (if there's room)
-function endSlide(p, natural) {
+export function endSlide(p, natural) {
   p.slide = 0; p.slideReady = now + MOVE.slideCooldown;
   p.crouchOn = natural || !canStand(p);
 }
@@ -1614,7 +1412,7 @@ function dropStuff(e, kind, type) {
   if (e.isPlayer) sfx.pick();
 }
 // battle royale: put a gun down at your feet (never the knife). The gun in your hands goes back to the knife.
-function dropGun(e, i) {
+export function dropGun(e, i) {
   if (!oneLife() || !e.alive || e.drop) return;
   const g = e.guns[i];
   if (!g || g.kind === 'melee') { if (e.isPlayer && g) toast("You can't drop the knife"); return; }
@@ -1686,7 +1484,7 @@ export function nearGun(e) {
 // with every slot full you swap the gun in your hands, so holding the knife picks nothing up
 export const knifeFull = p => p.guns.length >= MAX_SLOTS && p.guns[p.weapon].kind === 'melee';
 // E: open the chest in front of you, or trade the gun in your hands for the one at your feet
-function useKey(p) {
+export function useKey(p) {
   if (p.vehicle) return exitVehicle(p);
   const kd = nearKnocked(p); if (kd) return startRevive(p, kd); // a squadmate down: hold E to get them up
   const v = nearVehicle(p); if (v) return enterVehicle(p, v);

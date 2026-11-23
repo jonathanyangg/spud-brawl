@@ -79,6 +79,7 @@ cdnjs; where that host is blocked, point `THREE_JS` at a local r128 `three.min.j
 - `api.js`: accounts, coins, daily spin, shop, Stripe Checkout and webhook, cloud save (`/api/...`; off until configured, see [SETUP.md](SETUP.md))
 - `supabase/schema.sql`: the database (profiles, purchases, leaderboard scores, row level security, atomic spin/buy/credit/score functions)
 - `public/game.js`: the game (rendering, physics, combat, loot, game types, starting and ending matches, the main loop)
+- `public/player.js`: your input (mouse, keys, pointer lock) and each frame's movement, sliding, crawling and camera
 - `public/menu.js`: the menus: main menu and server browser, the online lobby and ready-up, settings, controls, invite links
 - `public/modes/`: one mode's own rules per file (`br.js`: storm, drop, chests, supply drop; `zombies.js`; `aim.js`), plus `runs.js`, the leaderboard run token and the over card's leaderboard line
 - `public/bots.js`: bot brains, the roster, and the host's bots on everyone else's screen
