@@ -5,8 +5,8 @@ import { sfx } from './audio.js';
 import * as P from './progress.js';
 import { $, V3, clamp } from './util.js';
 import {
-  AIM, CH, FLIGHT, SUPPLY, Z, supplyStatus, binds, brAlive, camera, carries, currentSpread, dressVM, ents, fixSlots, flightT, game, gunsFor, host, isUp, knifeFull,
-  lootName, nadesOn, nearChest, nearGun, now, oneLife, player, prog, rarCss, rayWorld, refreshVM, sameTeam, saveProgress, scoreLimit, slotIdx,
+  AIM, CH, FLIGHT, SUPPLY, Z, actionOf, supplyStatus, binds, brAlive, camera, carries, currentSpread, dressVM, ents, fixSlots, flightT, game, gunsFor, host, isUp, knifeFull,
+  lootName, nadesOn, nearChest, nearGun, nearKnocked, now, oneLife, player, prog, rarCss, rayWorld, refreshVM, sameTeam, saveProgress, scoreLimit, slotIdx,
   spec, squadmates, squadsOn, state, storm, stormText, teamScore, teamsOn, zLeft, zoomed
 } from './game.js';
 import { net } from './netsync.js';
@@ -28,7 +28,8 @@ export function toast(html, name, head) {
   const em = el.querySelector('em'); if (em) em.textContent = name + (head ? ' \u00b7 headshot' : '');
   el.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 1600);
 }
-export function addFeed(src, t, wname, head) {
+// knock: they went down, not out (battle royale squads)
+export function addFeed(src, t, wname, head, knock) {
   if (state !== 'playing') return;
   const li = document.createElement('li');
   const nm = e => { const b = document.createElement('b'); b.textContent = e.name; b.style.color = e.color; return b; };
@@ -36,6 +37,7 @@ export function addFeed(src, t, wname, head) {
   if (!self) li.appendChild(nm(src));
   const w = document.createElement('span'); w.className = 'w'; w.textContent = wname === 'Storm' ? 'storm' : self ? 'suicide' : wname; li.appendChild(w);
   if (head) { const h = document.createElement('span'); h.className = 'hs'; h.textContent = 'HEAD'; li.appendChild(h); }
+  if (knock) { const k = document.createElement('span'); k.className = 'kn'; k.textContent = 'KNOCKED'; li.appendChild(k); }
   li.appendChild(nm(t));
   if ((src && src.isPlayer) || t.isPlayer) li.className = 'me';
   const feed = $('feed'); feed.prepend(li);
@@ -317,9 +319,10 @@ function updateSquadHud() {
   el.textContent = '';
   const head = document.createElement('small'); head.textContent = `Squad ${(player.team | 0) + 1}`; el.append(head);
   for (const e of [player, ...mates]) {
-    const up = e === player ? player.alive : isUp(e), row = document.createElement('div'); row.className = 'sqRow' + (up ? '' : ' out') + (e === player ? ' me' : '');
+    const up = e === player ? player.alive : isUp(e), down = up && !!e.knock, row = document.createElement('div');
+    row.className = 'sqRow' + (up ? '' : ' out') + (down ? ' down' : '') + (e === player ? ' me' : '');
     const n = document.createElement('b'); n.textContent = e === player ? `${e.name} (you)` : e.name;
-    const bar = document.createElement('span'), fill = document.createElement('i'); fill.style.width = (up ? clamp(e.hp || 0, 0, 100) : 0) + '%'; bar.append(fill);
+    const bar = document.createElement('span'), fill = document.createElement('i'); fill.style.width = (up ? clamp(down ? e.knock.hp : e.hp || 0, 0, 100) : 0) + '%'; bar.append(fill);
     row.append(n, bar); el.append(row);
   }
 }
@@ -333,8 +336,10 @@ function updateBRHud() {
     if (d.stage === 'ride') s = t < FLIGHT.inStart ? 'Heading for the island…' : `${kj} · Jump (pushed out in ${Math.max(0, Math.ceil((FLIGHT.inEnd - t) * FLIGHT.dur))}s)`;
     else if (d.stage === 'fall') s = `${kj} · Open glider`;
   } else if (br) {
-    const ku = keyName(binds.use), c = nearChest(p);
-    if (c) s = `${ku} · Open chest`;
+    const ku = keyName(binds.use), kd = p.knock || p.rev ? null : nearKnocked(p), c = kd || p.knock || p.rev ? null : nearChest(p);
+    if (kd) s = `Hold ${ku} · Revive ${kd.name}`;
+    else if (p.knock || p.rev) s = '';
+    else if (c) s = `${ku} · Open chest`;
     else {
       const it = nearGun(p);
       if (it) s = knifeFull(p) ? `Slots full · hold a gun to swap for ${lootName(it)}` : `${ku} · ${p.guns.length < MAX_SLOTS ? 'Pick up' : 'Swap for'} ${lootName(it)}`;
@@ -352,7 +357,8 @@ function updateBRHud() {
   }
   const hl = shown().heals; $('heals').hidden = !oneLife() || !hl;
   if (oneLife() && hl) setText('heals', `${keyName(binds.bandage)} · ${hl.bandage | 0} bandage${hl.bandage === 1 ? '' : 's'} · ${keyName(binds.medkit)} · ${hl.medkit | 0} medkit${hl.medkit === 1 ? '' : 's'}`);
-  const u = p.useT; $('useBar').hidden = !u;
-  if (u) { setText('useName', `${HEALS[u.type].name}…`); $('useFill').style.width = (100 * clamp((now - u.start) / (u.end - u.start), 0, 1)).toFixed(1) + '%'; }
+  // the bar under the crosshair: your heal or revive, going down, or the squadmate you're watching
+  const act = state === 'playing' ? actionOf(!p.alive && spec.who ? spec.who : p) : null; $('useBar').hidden = !act;
+  if (act) { setText('useName', act.name); $('useFill').style.width = (100 * clamp(act.k, 0, 1)).toFixed(1) + '%'; $('useBar').classList.toggle('down', !!act.down); }
   drawMinimap();
 }

@@ -29,6 +29,10 @@ export const AMMO = {
 };
 // heals: hp restored (bandages only patch you up to cap), seconds to use (standing still; moving or shooting stops it), how many you can carry
 export const FRAGS = { name: 'Frag', max: 6, cd: 1.2 }; // battle royale: frags are loot, thrown with the equipment key
+// battle royale squads: what would kill you knocks you down while a squadmate still stands. hp: the knock bar (hits
+// drain it too), bleed: what it loses a second, revive: seconds a squadmate holds E over you, reach: how close they
+// stand, back: the health you get up with, speed: how fast you crawl
+export const KNOCK = { hp: 100, bleed: 3.4, revive: 5, reach: 2.2, back: 30, speed: 1.3 };
 export const HEALS = { bandage: { name: 'Bandage', hp: 25, time: 2.2, max: 10, cap: 75 }, medkit: { name: 'Medkit', hp: 100, time: 5, max: 3 } };
 // chest guns by weight (weapon index, weight), and the color of each gun's loot beam (how good it is)
 export const CHEST_GUNS = [[0, 26], [1, 22], [2, 14], [3, 26], [4, 5]];

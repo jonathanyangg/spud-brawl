@@ -73,7 +73,7 @@ wss.on('connection', (ws, req) => {
   if (!room) rooms.set(code, room = {
     map: MAPS.includes(q.get('map')) ? q.get('map') : MAPS[0], game: GAMES.includes(q.get('game')) ? q.get('game') : GAMES[0],
     cfg: { bots: int(q.get('bots'), 0, 11, 0), diff: DIFFS.includes(q.get('diff')) ? q.get('diff') : 'normal', ts: int(q.get('ts'), 1, 6, 4),
-      lim: int(q.get('lim'), 5, 100, 25), side: q.get('side') === 'split' ? 'split' : 'together', sq: int(q.get('sq'), 1, 4, 1), hok: [0, 25, 50].includes(+q.get('hok')) ? +q.get('hok') : 0 }, // sq: battle royale squad size; hok: health back per kill
+      lim: int(q.get('lim'), 5, 100, 25), side: q.get('side') === 'split' ? 'split' : 'together', sq: int(q.get('sq'), 1, 4, 1), hok: [0, 25, 50].includes(+q.get('hok')) ? +q.get('hok') : 0, fill: q.get('fill') === '0' ? 0 : 1 }, // sq: battle royale squad size; hok: health back per kill; fill: bots fill the players' squads
     pub: q.get('pub') === '1', peers: new Map(),
     locked: false, inMatch: new Set(), seats: new Map(), // locked: a battle royale is on; inMatch: who was here when it started; seats: their squads
     keys: new Map(), // player id -> their secret key, for everyone seated (and, while locked, everyone in the match)
@@ -89,6 +89,7 @@ wss.on('connection', (ws, req) => {
   else if (peers.size >= MAX_PLAYERS) { ws.send('{"t":"full"}'); ws.close(); return; }
   else ws.team = room.locked && room.seats.has(id) ? room.seats.get(id) : pickTeam(room);
   peers.set(id, ws); room.keys.set(id, key);
+  if (fitSquads(room)) reseat(room, ws); // the party outgrew its squads: they grow so it stays together
   ws.send(roomMsg(room, ws));
 
   // catch the newcomer up on everyone already here
@@ -117,9 +118,8 @@ wss.on('connection', (ws, req) => {
         if (!room.locked) for (const k of [...room.keys.keys()]) if (!peers.has(k)) room.keys.delete(k); // match over: forget who left
       } else if (o.t === 'set') {
         if (room.locked) return; // mid battle royale: re-seating would reshuffle the squads of players still in it
-        setRoom(room, o);
-        const seated = []; for (const peer of peers.values()) { peer.team = pickTeam(room, seated); seated.push(peer); } // seat everyone again
-        for (const peer of peers.values()) if (peer.readyState === 1) peer.send(roomMsg(room, peer));
+        setRoom(room, o); fitSquads(room);
+        reseat(room);
       } else if (typeof o.k === 'string' && o.k !== id && peers.has(o.k)) {
         const list = [...peers], i = list.findIndex(([k]) => k === o.k), [lead] = list.splice(i, 1);
         peers.clear(); for (const [k, v] of [lead, ...list]) peers.set(k, v);
@@ -160,8 +160,21 @@ function setRoom(room, o) {
   if (o.side === 'split' || o.side === 'together') c.side = o.side;
   if (has('sq')) c.sq = int(o.sq, 1, 4, c.sq);
   if ([0, 25, 50].includes(o.hok)) c.hok = o.hok;
+  if (o.fill === 0 || o.fill === 1) c.fill = o.fill;
   if (FIXED_CFG[room.game]) Object.assign(c, FIXED_CFG[room.game]);
   if (typeof o.pub === 'boolean') room.pub = o.pub;
+}
+// battle royale: a party of 2 to 4 plays in one squad, so the squads are at least that big (duos can play duos, trios
+// or squads, never solos). Bigger parties get split up anyway, so anything goes for them. True if it changed sq.
+const minSq = n => (n >= 2 && n <= 4 ? n : 1);
+function fitSquads(room) {
+  if (room.game !== 'br' || room.locked || room.cfg.sq >= minSq(room.peers.size)) return false;
+  room.cfg.sq = minSq(room.peers.size); return true;
+}
+// seat everyone again and tell them (skip: someone who's about to be told anyway)
+function reseat(room, skip) {
+  const seated = []; for (const peer of room.peers.values()) { peer.team = pickTeam(room, seated); seated.push(peer); }
+  for (const peer of room.peers.values()) if (peer !== skip && peer.readyState === 1) peer.send(roomMsg(room, peer));
 }
 // team deathmatch seats: 'together' fills the first team with players (bots make up the rest), 'split' evens them out
 // battle royale squads: players fill squad 0 first, then squad 1, and so on, sq to a squad (solos: nobody shares)

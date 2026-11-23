@@ -17,8 +17,13 @@ straight in.
   your glider and steer down. You land with only a knife. Chests (E) hold a gun, ammo for it and sometimes a bandage
   or medkit (B or N; it takes a few seconds standing still; moving cancels it), and sometimes frags (G to throw). X drops
   the gun in your hands. Pick Solo, Duos, Trios or Squads: online, players in the same room fill squads in the order they
-  join and bots fill the rest; squadmates can't hurt each other, the last squad standing wins, and once you're out you
-  spectate your squad (Space for the next one). Heal on kill (+25 or +50 HP per elimination) is an option. Reloads use the ammo you carry, you can hold the
+  join and bots fill the rest (or, with No fill, you play your squad short); a party of 2 to 4 always shares one squad,
+  so a room of two can play Duos, Trios or Squads but not Solo. Squadmates can't hurt each other. While a squadmate is
+  still standing, what would kill you knocks you down instead: you crawl, can't shoot or heal, and bleed out unless a
+  squadmate holds E over you for 5 seconds (you get up with 30 HP); whoever finishes you gets the kill. The last squad
+  standing wins, and once you're out you spectate your squad (Space for the next one), with their heals and revives
+  shown on the bar under the crosshair. The inventory (Tab) has Drop buttons to leave a pack of ammo, a heal or a frag
+  at your feet for a squadmate. Heal on kill (+25 or +50 HP per elimination) is an option. Reloads use the ammo you carry, you can hold the
   knife and three guns, and whoever goes down drops what they had. Bots play by the same rules: they pick up the ammo,
   heals and frags they're short of, run guns dry, and throw frags. About 75 seconds after the drop the blimp comes back
   for a second pass and drops a supply crate on a parachute. The map shows its route, a ring where it will land and a countdown, and a marker
@@ -99,6 +104,8 @@ cdnjs; where that host is blocked, point `THREE_JS` at a local r128 `three.min.j
 ## Controls
 
 WASD move, Shift sprint, C crouch, Space jump, right-click aim down sights, 1/2/3 or wheel to switch weapon, G throw equipment, R reload. All rebindable under Controls.
+
+Each gun has its own reload sound (mag out, mag in, charging handle; shells and a pump for the shotgun; the bolt for the sniper), and you hear other players' and bots' reloads where they stand. In modes scored by kills, taking yourself out (your own rocket or frag, a fall, the storm) still gives the kill to whoever hurt you in the last 10 seconds, or to your only opponent left.
 
 **Settings** (sensitivity, aiming sensitivity, field of view, volume, music) and your **Loadout** open from the pause screen too, so you never have to leave a match. Weapon changes made mid-match apply when you next respawn.
 

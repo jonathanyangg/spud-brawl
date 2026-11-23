@@ -1,15 +1,15 @@
 // Online play: the presence this game streams through the relay, other players' presences and events, and who hosts the room.
 import { AMMO_OF, DIFF, GAMES, HATS, TEAM_COLORS, WEAPONS, WNAMES } from './config.js';
 import { LIMIT, MAPS, currentMap } from './world.js';
-import { sfx, sfxShot } from './audio.js';
+import { sfx, sfxReload, sfxShot } from './audio.js';
 import { joinRoom } from './net.js';
 import * as P from './progress.js';
 import { applyLook } from './skins.js';
 import { $, V3, clamp } from './util.js';
 import {
-  BLOOD, CAMO_IDS, CH, DROP_ST, NADE_TYPES, UNIFORM_IDS, Z, _b, angDiff, beginMatch, bodyC, burst, cfg, corpse, damage, decItems, distVol,
-  endGame, ents, game, gunGameStep, hostPeer, mode, muzzleOf, nearestZombie, newEntity, now, oneLife, openChest, outOfMatch, readyHere, player, poseSoldier, prog,
-  refreshVM, resetBR, resetZombies, respawn, scene, setCanopy, setGame, setMap, setTag, settings, soldierMesh, spawnNade, spillItems, squadsOn,
+  BLOOD, CAMO_IDS, CH, DROP_ST, HEAL_KEYS, NADE_TYPES, UNIFORM_IDS, Z, _b, angDiff, beginMatch, bodyC, burst, cfg, corpse, damage, decItems, distVol,
+  endGame, ents, game, gunGameStep, hostPeer, idOf, mode, muzzleOf, nearestZombie, newEntity, now, oneLife, openChest, outOfMatch, readyHere, player, poseSoldier, prog,
+  refreshVM, resetBR, resetZombies, respawn, revProg, revived, scene, setCanopy, setGame, setMap, setTag, settings, soldierMesh, spawnNade, spillItems, squadsOn,
   state, stormState, syncStorm, syncZombies, takeItem, teamScore, teams, teamsOn, toMenu, tracer, winnerNow, zHost, zombieState
 } from './game.js';
 import { botState, byId, humansInMatch, makeBot, myBot, removeNetBot, syncBots } from './bots.js';
@@ -55,7 +55,9 @@ export function netSend(force) {
     cr: r2(p.crouch), sl: r2(p.slideK), tm: p.team, dr: p.drop ? DROP_ST.indexOf(p.drop.stage) : 0,
     bt: botHost() ? botState() : undefined, sto: botHost() && oneLife() ? stormState() : undefined, tsc: botHost() && teamsOn() ? teamScore() : undefined,
     sk: prog.uniform, cm: prog.camo[p.guns[p.weapon].id], lv: P.level(prog), su: p.guns[p.weapon].sup ? 1 : 0, lb: state === 'lobby' ? 1 : 0, rd: readyHere() && net.ready ? 1 : 0, ov: state === 'over' ? 1 : 0,
-    vh: p.vehicle && p.alive ? vehicleState(p.vehicle) : undefined,
+    vh: p.vehicle && p.alive ? vehicleState(p.vehicle) : undefined, rl: p.reloading && p.alive ? r2(p.reloadEnd - p.reloadStart) : undefined,
+    kn: p.knock && p.alive ? Math.max(1, Math.ceil(p.knock.hp)) : undefined, rv: p.rev && p.alive ? [idOf(p.rev.who), r2(revProg(p))] : undefined,
+    hl: p.useT && p.alive ? [HEAL_KEYS.indexOf(p.useT.type), r2(clamp((now - p.useT.start) / (p.useT.end - p.useT.start), 0, 1))] : undefined,
     z: game === 'zombies' && zHost() ? zombieState() : undefined, iv: oneLife() && p.alive ? invState(p) : undefined });
 }
 // battle royale: what I carry, for a squadmate spectating me: [held gun, its mag, spare ammo for it, bandages, medkits,
@@ -65,7 +67,7 @@ function invState(p) {
   return [p.weapon, p.ammo[p.weapon] | 0, at ? p.res[at] | 0 : 0, p.heals.bandage | 0, p.heals.medkit | 0, p.frags | 0, ...p.guns.flatMap(g => [g.id, g.rar | 0, g.slot | 0])];
 }
 export function startOnline(code) {
-  const opts = { map: settings.map, game, bots: settings.bots, diff: settings.diff, ts: settings.ts, lim: settings.lim, side: settings.side, sq: settings.sq, hok: settings.hok, pub: settings.pub ? 1 : 0 };
+  const opts = { map: settings.map, game, bots: settings.bots, diff: settings.diff, ts: settings.ts, lim: settings.lim, side: settings.side, sq: settings.sq, hok: settings.hok, fill: settings.fill === 0 ? 0 : 1, pub: settings.pub ? 1 : 0 };
   net.room = joinRoom(code, net.myPeer, net.key, opts, {
     onPeer: applyRemote,
     onHost: setHost,
@@ -73,7 +75,7 @@ export function startOnline(code) {
       net.map = map; net.pub = pub !== false;
       const changed = GAMES[g] && g !== 'aim' && g !== game;
       if (changed) { setGame(g); resetZombies(); player.kills = player.deaths = 0; toast('This room plays <em></em>', GAMES[g], false); }
-      if (c && typeof c === 'object') net.cfg = { bots: clamp(c.bots | 0, 0, 11), diff: DIFF[c.diff] ? c.diff : 'normal', ts: clamp(c.ts | 0, 1, 6), lim: clamp(c.lim | 0, 5, 100), side: c.side, sq: clamp(c.sq | 0, 1, 4), hok: [0, 25, 50].includes(c.hok) ? c.hok : 0 };
+      if (c && typeof c === 'object') net.cfg = { bots: clamp(c.bots | 0, 0, 11), diff: DIFF[c.diff] ? c.diff : 'normal', ts: clamp(c.ts | 0, 1, 6), lim: clamp(c.lim | 0, 5, 100), side: c.side, sq: clamp(c.sq | 0, 1, 4), hok: [0, 25, 50].includes(c.hok) ? c.hok : 0, fill: c.fill === 0 ? 0 : 1 };
       player.team = teamsOn() ? (team === 1 ? 1 : 0) : squadsOn() ? clamp(team | 0, 0, 11) : undefined;
       if (squadsOn()) toast('You are in squad <em></em>', String((player.team | 0) + 1), false);
       player.color = teamsOn() ? TEAM_COLORS[player.team] : myHat;
@@ -130,6 +132,11 @@ export function applyRemote(id, s, seat) {
   r.hp = num(s.hp); r.kills = Math.max(0, s.k | 0); r.deaths = Math.max(0, s.d | 0); r.m = s.m | 0;
   r.lobby = s.lb === 1; r.ready = s.rd === 1; r.over = s.ov === 1; r.dead = s.dd === 1; // lb: waiting in the lobby; a: in play right now; dd: actually down (paused players are neither)
   r.crouch = clamp(num(s.cr), 0, 1); r.slideK = clamp(num(s.sl), 0, 1); r.su = s.su === 1;
+  // knocked down (their knock bar), the heal in their hands, who they're reviving: for their pose and the bars
+  const up = s.a === 1;
+  r.knock = up && num(s.kn) > 0 ? { hp: clamp(num(s.kn), 0, 100) } : null;
+  r.healT = up && Array.isArray(s.hl) ? HEAL_KEYS[s.hl[0] | 0] || null : null; r.healP = Array.isArray(s.hl) ? clamp(num(s.hl[1]), 0, 1) : 0;
+  r.revId = up && Array.isArray(s.rv) && typeof s.rv[0] === 'string' ? s.rv[0].slice(0, 16) : null; r.revP = Array.isArray(s.rv) ? clamp(num(s.rv[1]), 0, 1) : 0;
   // their look: gun camo follows the weapon in hand; the tag shows their level
   const sk = cleanUniform(s.sk), cm = cleanCamo(s.cm), lv = cleanLevel(s.lv);
   if (sk !== r.sk) { r.sk = sk; applyLook(r.mesh.userData.uniM, sk); }
@@ -146,6 +153,7 @@ export function applyRemote(id, s, seat) {
   if (alive && !r.alive) { r.alive = true; r.pos.copy(r.target); r.yaw = r.tyaw; r.mesh.visible = true; poseSoldier(r, 0); }
   else if (!alive && r.alive) { r.alive = false; r.mesh.visible = false; }
   remoteDrop(r, s.dr);
+  remoteReload(r, s.rl);
   if (remoteVehicle(r, r.alive ? s.vh : null, net.myPeer)) toast(`<em></em> got to the wheel first`, r.name, false);
   const last = net.lastSeq.get(id) || 0; let max = last;
   for (const e of (Array.isArray(s.ev) ? s.ev : [])) {
@@ -181,6 +189,15 @@ function handleNetEvent(r, e) {
     // one of the host's bots went down
     const b = r.peer === net.host && net.bots.get('b' + (e[2] | 0));
     if (b) remoteDied(b, byId(e[3]), wname(e[4]), e[5] === 1);
+  } else if (type === 'kn') {
+    // someone went down (them, or one of the host's bots): the feed, and a toast if it was me
+    const v = e[2] === r.peer ? r : r.peer === net.host && typeof e[2] === 'string' ? net.bots.get(e[2]) : null;
+    if (v) { const by = byId(e[3]); addFeed(by, v, wname(e[4]), e[5] === 1, true); if (by === player && state === 'playing') { sfx.kill(); toast('Knocked <em></em>', v.name, e[5] === 1); } }
+  } else if (type === 'rv') {
+    // a squadmate got me (or, if I run the bots, one of mine) back up
+    const by = byId(e[3]) || r;
+    if (e[2] === net.myPeer && state === 'playing') revived(player, by);
+    else if (typeof e[2] === 'string' && e[2][0] === 'b' && botHost()) { const b = myBot(e[2]); if (b) revived(b, by); }
   } else if (type === 'n') {
     const t = NADE_TYPES[clamp(e[8] | 0, 0, NADE_TYPES.length - 1)], v = c => clamp(num(c), -60, 60);
     const nl = LIMIT + 10, pos = new V3(clamp(num(e[2]), -nl, nl), clamp(num(e[3]), -5, 130), clamp(num(e[4]), -nl, nl));
@@ -203,6 +220,12 @@ function handleNetEvent(r, e) {
   }
 }
 const wname = i => WNAMES[clamp(i | 0, 0, WNAMES.length - 1)];
+// someone else started a reload (rl: its length in seconds): play it where they stand
+export function remoteReload(r, rl) {
+  const on = r.alive && Number.isFinite(rl) && rl > 0;
+  if (on && !r.rlOn) sfxReload(r.weapon, clamp(rl, 0.3, 6), distVol(r.pos) * 0.9);
+  r.rlOn = on;
+}
 // someone else's drop stage (0 on the ground, then ride, fall, glide): hidden on the blimp, canopy while gliding, can't be hit
 export function remoteDrop(r, v) {
   const st = DROP_ST[clamp(v | 0, 0, 3)];

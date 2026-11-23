@@ -1,17 +1,17 @@
 // Spud Brawl: a free-for-all arena shooter. three.js is loaded as a global by index.html.
 import {
-  ACTIONS, AMMO, AMMO_OF, CHEST_GUNS, DEFAULT_BINDS, EVENT, EYE, FRAGS, G, GAMES, GUNGAME, H, HEALS, JUMP, KNIFE, MAX_SLOTS, MOVE, PLAYER_COLOR, R,
+  ACTIONS, AMMO, AMMO_OF, CHEST_GUNS, DEFAULT_BINDS, EVENT, EYE, FRAGS, G, GAMES, GUNGAME, H, HEALS, JUMP, KNIFE, KNOCK, MAX_SLOTS, MOVE, PLAYER_COLOR, R,
   RARITY, SCORE_LIMIT, SNIPER, STEP, TEAM_NAMES, THROWABLES, WEAPONS, WNAMES, eventOn, keyName, validCode
 } from './config.js';
 import { CHESTS, HALF, ICE, LIMIT, MAPS, PADS, PAD_R, SPAWNS, STAIRS, boxGeo, boxes, currentMap, loadMap } from './world.js';
-import { initAudio, setVolume, sfx, sfxShot, toggleMute } from './audio.js';
+import { initAudio, setVolume, sfx, sfxReload, sfxShot, toggleMute } from './audio.js';
 import { setMusic, setMusicOn } from './music.js';
 import * as P from './progress.js';
 import { applyLook } from './skins.js';
 import { initArmory, openArmory } from './armory.js';
 import { boards, initAccount, postScore, progressSaved, startRun } from './account.js';
 import { $, V3, clamp, rand } from './util.js';
-import { navPoint, setupBots, stairWaypoint, updateBot, updateRoster } from './bots.js';
+import { byId, navPoint, setupBots, stairWaypoint, updateBot, updateRoster } from './bots.js';
 import {
   applyRemote, botHost, checkWinOnline, cleanName, cleanRoom, leaveRoom, myHat, net, netEvent, netSend, num, r2, sendLock, startOnline,
   updateNetStatus, updateRemotes
@@ -28,7 +28,7 @@ const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // ---------- settings ----------
 export const settings = { name: 'Soldier', diff: 'normal', bots: 5, sens: 1, adsSens: 1, fov: 75, vol: 1, mode: 'bots', game: 'ffa', room: 'brawl', map: 'depot', music: true,
-  ts: 4, lim: 25, side: 'together', pub: true, sq: 1, hok: 0 }; // hok: battle royale, health back for each elimination (0, 25 or 50) // sq: battle royale squad size (1 solo, 2 duos, 3 trios, 4 squads) // ts: players a side and lim: score to win (team deathmatch); pub: list my room
+  ts: 4, lim: 25, side: 'together', pub: true, sq: 1, hok: 0, fill: 1 }; // fill: bots fill your squad (battle royale) // hok: battle royale, health back for each elimination (0, 25 or 50) // sq: battle royale squad size (1 solo, 2 duos, 3 trios, 4 squads) // ts: players a side and lim: score to win (team deathmatch); pub: list my room
 try { Object.assign(settings, JSON.parse(localStorage.getItem('spudbrawl') || '{}')); } catch (e) {}
 function saveSettings() { try { localStorage.setItem('spudbrawl', JSON.stringify(settings)); } catch (e) {} }
 // progression (XP, unlocks, loadout) is saved per browser, separately from settings
@@ -131,7 +131,7 @@ function spreadDir(f, s) {
 }
 export const angDiff = (a, b) => { let d = b - a; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; return d; };
 // How tall someone is right now, as a fraction of standing height: crouching and sliding lower you.
-export const poseK = e => 1 - 0.23 * e.crouch * (1 - e.slideK) - 0.41 * e.slideK;
+export const poseK = e => (e.knock ? 0.45 : 1 - 0.23 * e.crouch * (1 - e.slideK) - 0.41 * e.slideK); // knocked down: on the ground
 // hit spheres at standing height: [height, radius, zone]; scaled down by poseK
 const HITS = [[1.67, 0.22, 'head'], [1.25, 0.34, 'body'], [0.55, 0.3, 'legs']];
 export const eyePos = (e, out = new V3()) => out.set(e.pos.x, e.pos.y + EYE * poseK(e), e.pos.z);
@@ -195,6 +195,7 @@ const SKINS = [0xf1c6a0, 0xd9a47a, 0xb07a52, 0x7a4b2e, 0xe8b894];
 const SM = {
   boot: new THREE.MeshLambertMaterial({ color: 0x2a2620 }), gear: new THREE.MeshLambertMaterial({ color: 0x3b3f2e }),
   visor: new THREE.MeshLambertMaterial({ color: 0x15181c }), glove: new THREE.MeshLambertMaterial({ color: 0x2f2b25 }),
+  cloth: new THREE.MeshLambertMaterial({ color: 0xf4f1e8 }), kit: new THREE.MeshLambertMaterial({ color: 0xd9452f }),
 };
 export const UNIFORM_IDS = P.UNIFORMS.map(u => u[0]), CAMO_IDS = P.CAMOS.map(c => c[0]);
 export const pick = a => a[(Math.random() * a.length) | 0];
@@ -266,7 +267,13 @@ export function soldierMesh(name, color, addToScene = true, look = {}) {
   piece(aim, gunM, 0.06, 0.18, 0.08, 0.1, -0.17, -0.42); // magazine
   piece(aim, gunM, 0.07, 0.1, 0.22, 0.1, -0.06, -0.08);  // stock
   const muzzle = new THREE.Object3D(); muzzle.position.set(0.1, -0.02, -0.8); aim.add(muzzle);
-  g.userData = { legs, upper, aim, muzzle, vestM, uniM, gunM, skinM, bob: 0 };
+  const ownGun = aim.children.filter(m => m.material === gunM);
+  // the heals, held out in both hands while they use one (the gun is put away meanwhile)
+  const bandage = new THREE.Group(); bandage.position.set(0.09, -0.1, -0.44); bandage.visible = false; aim.add(bandage);
+  piece(bandage, SM.cloth, 0.13, 0.13, 0.11, 0, 0, 0); piece(bandage, SM.cloth, 0.05, 0.02, 0.24, 0.03, -0.065, 0.1); // a roll and its loose end
+  const medkit = new THREE.Group(); medkit.position.set(0.05, -0.12, -0.46); medkit.visible = false; aim.add(medkit);
+  piece(medkit, SM.kit, 0.3, 0.2, 0.1, 0, 0, 0); piece(medkit, SM.cloth, 0.15, 0.045, 0.02, 0, 0, -0.055); piece(medkit, SM.cloth, 0.045, 0.15, 0.02, 0, 0, -0.055);
+  g.userData = { legs, upper, aim, muzzle, vestM, uniM, gunM, skinM, ownGun, props: { bandage, medkit }, bob: 0 };
   if (name) setTag(g, name, color, look.lv);
   if (addToScene) scene.add(g);
   return g;
@@ -278,7 +285,7 @@ export function poseSoldier(e, dt) {
     u.tag.visible = ally || !versus(); // zombies and the range: everyone's on your side
     if (u.tag.material.depthTest === ally) { u.tag.material.depthTest = !ally; u.tag.renderOrder = ally ? 10 : 0; }
   }
-  const run = e.seated ? 0 : Math.min(1, sp / 6) * (1 - e.slideK), c = e.seated ? 1 : e.crouch * (1 - e.slideK), s = e.slideK;
+  const run = e.seated ? 0 : Math.min(1, sp / 6) * (1 - e.slideK), c = e.seated || revTarget(e) ? 1 : e.crouch * (1 - e.slideK), s = e.slideK; // reviving: kneel
   u.bob += dt * sp * 1.9;
   const ph = Math.floor(u.bob / Math.PI);
   if (ph !== u.stepPh) {
@@ -296,6 +303,18 @@ export function poseSoldier(e, dt) {
     hip.rotation.x = 1.5 * c + 1.35 * s + side * sw;
     knee.rotation.x = -1.5 * c - 0.15 * s - Math.max(0, side * Math.sin(u.bob + 1.2)) * 0.9 * run;
   });
+  // healing: the gun goes away and the bandage or medkit comes out, held low (a bandage gets wound on); puffs of
+  // green crosses come off other players, like they do off bots
+  const heal = healOf(e), down = !!e.knock;
+  for (const g of u.ownGun) g.visible = !heal && !down;
+  u.props.bandage.visible = heal === 'bandage'; u.props.medkit.visible = heal === 'medkit';
+  if (heal) u.aim.rotation.x = -0.55 - u.upper.rotation.x + (heal === 'bandage' ? Math.sin(now * 11) * 0.12 : Math.sin(now * 3) * 0.04);
+  if (heal && e.remote && now > (u.puffAt || 0) + 0.35) { u.puffAt = now; bodyC(e, _hb); _hb.y += 0.3; burst(_hb, [0x6fe36f, 0xb8f7a8, 0xffffff], 3, 1.2, 0.07, 0.7); }
+  if (down) { // knocked down: flat on the ground, dragging themselves along
+    const cr = Math.sin(u.bob * 0.8) * Math.min(1, sp);
+    u.upper.position.y = 0.3; u.upper.rotation.x = -1.3; u.aim.rotation.x = 1.25 + cr * 0.25;
+    u.legs.forEach(({ hip, knee }, i) => { hip.position.y = 0.3; hip.rotation.x = -1.35 + (i ? cr : -cr) * 0.2; knee.rotation.x = -0.3; });
+  }
   m.position.copy(e.pos); m.rotation.set(0, e.yaw, 0);
   e.flash = Math.max(0, e.flash - dt);
   u.vestM.emissive.setRGB(e.flash * 5, e.flash * 1.2, 0);
@@ -396,6 +415,7 @@ export function respawn(e) {
   e.yaw = Math.atan2(e.pos.x, e.pos.z) + rand(-0.4, 0.4); e.pitch = 0; e.protectUntil = now + 1.5; e.lastHurt = -99;
   if (e.vehicle) exitVehicle(e);
   e.res = { light: 0, shells: 0, heavy: 0, rockets: 0 }; e.heals = { bandage: 0, medkit: 0 }; e.frags = 0; e.useT = null; e.drop = null; e.landedAt = -99; e.hurtBy = null;
+  e.knock = null; e.rev = null;
   if (e.isPlayer) endSpec();
   if (!e.isPlayer) {
     e.ai.target = null; e.ai.visible = false; e.ai.goal = null; e.climb = null;
@@ -423,18 +443,19 @@ export const teamsOn = () => game === 'tdm';
 export const squadsOn = () => game === 'br' && (cfg().sq | 0) > 1;
 const alliesOn = () => teamsOn() || squadsOn();
 export const sameTeam = (a, b) => alliesOn() && a !== b && a.team !== undefined && a.team === b.team;
-// which squad each of n bots joins: the players' squads fill up first, then the bots make squads of their own
-export function botSquads(hum, sq, n) {
+// which squad each of n bots joins: the players' squads fill up first (unless fill is off: then the players play their
+// squads short), then the bots make squads of their own
+export function botSquads(hum, sq, n, fill = true) {
   const size = new Map(); for (const h of hum) if (h.team !== undefined) size.set(h.team, (size.get(h.team) || 0) + 1);
   const out = [];
-  for (const [t, k] of size) for (let i = k; i < sq && out.length < n; i++) out.push(t);
+  if (fill) for (const [t, k] of size) for (let i = k; i < sq && out.length < n; i++) out.push(t);
   for (let t = 0; out.length < n; t++) { if (size.has(t)) continue; for (let i = 0; i < sq && out.length < n; i++) out.push(t); }
   return out;
 }
 const SQUAD_NAMES = ['', 'Solo', 'Duos', 'Trios', 'Squads'];
 // the match settings: the room's online, the menu's offline
 export const cfg = () => {
-  const c = mode === 'online' && net.cfg ? net.cfg : { bots: settings.bots, diff: settings.diff, ts: settings.ts, lim: settings.lim, side: settings.side, sq: clamp(settings.sq | 0, 1, 4), hok: [0, 25, 50].includes(settings.hok) ? settings.hok : 0 };
+  const c = mode === 'online' && net.cfg ? net.cfg : { bots: settings.bots, diff: settings.diff, ts: settings.ts, lim: settings.lim, side: settings.side, sq: clamp(settings.sq | 0, 1, 4), hok: [0, 25, 50].includes(settings.hok) ? settings.hok : 0, fill: settings.fill === 0 ? 0 : 1 };
   return game === EVENT.game ? { ...c, bots: EVENT.bots, diff: EVENT.diff } : c; // the event's bots are fixed
 };
 // team scores: every soldier's kills plus the kills of bots that have left (bank). Online the bot host adds them up.
@@ -462,7 +483,7 @@ export function winnerNow() {
   return ents.find(e => !e.zombie && (!e.remote || e.netbot || e.m === net.m) && e.kills >= scoreLimit()) || null;
 }
 // how other screens name a soldier in events: a player's id, 'b' + a bot's id, or '' for nobody
-const idOf = e => (!e ? '' : e.isPlayer ? net.myPeer : e.remote ? e.peer : e.bid ? 'b' + e.bid : '');
+export const idOf = e => (!e ? '' : e.isPlayer ? net.myPeer : e.remote ? e.peer : e.bid ? 'b' + e.bid : '');
 export const versus = () => game !== 'zombies' && game !== 'aim';
 export const oneLife = () => game === 'br';
 export const nadesOn = () => game === 'ffa' || game === 'fest' || game === 'zombies' || game === 'br'; // battle royale: only the frags you find
@@ -477,11 +498,12 @@ export function gunGameStep(e) {
 // ---------- combat ----------
 export function startReload(e) {
   const w = e.guns[e.weapon];
-  if (e.reloading || e.useT || e.ammo[e.weapon] >= w.mag) return;
+  if (e.reloading || e.useT || e.knock || e.ammo[e.weapon] >= w.mag) return;
   const at = AMMO_OF[w.id];
   if (carries(e) && at && !(e.res[at] > 0)) { if (e.isPlayer && now > (e.noAmmoAt || 0)) { toast('Out of <em></em>', AMMO[at].name, false); e.noAmmoAt = now + 1.5; } return; }
   e.reloading = true; e.reloadStart = now; e.reloadEnd = now + w.reload; e.reloadWeapon = e.weapon;
-  if (e.isPlayer) sfx.reload();
+  if (e.rlStop) e.rlStop();
+  e.rlStop = sfxReload(w.id, w.reload, e.isPlayer ? 1 : distVol(e.pos), w.mag - e.ammo[e.weapon]);
 }
 function switchWeapon(e, i) {
   if (i === e.weapon || i < 0 || i >= e.guns.length) return;
@@ -506,8 +528,9 @@ export const _o = new V3(), _f = new V3(), _h = new V3(), _b = new V3();
 export const BLOOD = [0x8b1a1a, 0x6a1212];
 export function tryFire(e) {
   const w = e.guns[e.weapon], melee = w.kind === 'melee';
-  if (now < e.nextShot || e.reloading || e.drop) return false;
+  if (now < e.nextShot || e.reloading || e.drop || e.knock) return false;
   if (e.useT) e.useT = null; // shooting stops a heal
+  if (e.rev) e.rev = null; // and a revive
   if (!melee && e.ammo[e.weapon] <= 0) { startReload(e); return false; }
   if (!melee) e.ammo[e.weapon]--;
   e.nextShot = now + w.rate; if (!melee) e.sprintBlock = now + 0.35;
@@ -574,7 +597,15 @@ function hitscan(shooter, o, d, w, muzzle, acc) {
 }
 export function damage(t, amt, src, wname, head, pt) {
   if (t.remote || !t.alive || t.drop || now < t.protectUntil) return;
-  t.hp -= amt; t.lastHurt = now; t.flash = 0.12; if (src && src !== t) t.hurtBy = src;
+  if (t.knock) { // already down: it comes off the knock bar, and whoever finishes them gets the kill
+    const k = t.knock; k.hp -= amt; t.flash = 0.12;
+    if (pt) burst(pt, BLOOD, 3, 3, 0.07, 0.5);
+    if (src && src !== t && !sameTeam(src, t)) { k.by = src; k.wname = wname; k.head = head; }
+    if (src && src.isPlayer && t !== src) { hitMarker(head, k.hp <= 0); sfx.hit(); }
+    if (k.hp <= 0) finishKnock(t);
+    return;
+  }
+  t.hp -= amt; t.lastHurt = now; t.flash = 0.12; if (src && src !== t) { t.hurtBy = src; t.hurtAt = now; }
   if (pt) burst(pt, BLOOD, head ? 6 : 3, 3, 0.07, 0.5);
   if (src && src.isPlayer && t !== src) { hitMarker(head, t.hp <= 0); head ? sfx.head() : sfx.hit(); }
   if (t.isPlayer) { sfx.hurt(); if (src && src !== t) { fx.dmgFrom = src; fx.dmg = 1; } shake = Math.max(shake, 0.12); }
@@ -582,10 +613,22 @@ export function damage(t, amt, src, wname, head, pt) {
     const ai = t.ai;
     if (!ai.visible || ai.target !== src) { ai.target = src; ai.reactAt = now + ai.d.react * 0.6; ai.lastSeen.copy(src.pos); ai.lastSeenAt = now; ai.goal = null; }
   }
-  if (t.hp <= 0) kill(t, src, wname, head);
+  if (t.hp <= 0) { if (canKnock(t)) knockDown(t, src, wname, head); else kill(t, src, wname, head); }
+}
+// who gets the kill when someone takes themselves out (their own rocket or frag, the storm, a fall): whoever last hurt
+// them in the last 10 s, or, with nobody, their only opponent left in the match. Then a suicide can't dodge a loss.
+const CREDIT_WINDOW = 10;
+function creditFor(t, src) {
+  if ((src && src !== t) || !versus() || t.zombie) return null;
+  const h = t.hurtBy;
+  if (h && h !== t && now - (t.hurtAt ?? -99) < CREDIT_WINDOW && !sameTeam(h, t) && ents.includes(h)) return h;
+  const foes = ents.filter(e => e !== t && !e.zombie && inMatch(e) && !sameTeam(e, t));
+  return foes.length === 1 && !oneLife() ? foes[0] : null; // battle royale: the last one standing wins anyway
 }
 function kill(t, src, wname, head) {
   if (t.zombie) return zombieDied(t, src, wname, head);
+  const own = !src || src === t, by = creditFor(t, src); if (by) src = by; // they took themselves out: the kill goes to whoever had them
+  const down = t.knock; t.knock = null; t.rev = null;
   t.alive = false; t.hp = 0; t.deaths++;
   const self = !src || src === t;
   if (!self) { src.kills++; gunGameStep(src); }
@@ -600,8 +643,14 @@ function kill(t, src, wname, head) {
   t.respawnAt = (t.isPlayer && game === 'zombies') || oneLife() ? Infinity : now + (t.isPlayer ? 4 : 3); // zombies: back next wave
   if (t.isPlayer) {
     deathPos.copy(camera.position); killer = self ? null : src; t.diedAt = now;
-    $('deathBy').textContent = wname === 'Storm' ? 'The storm got you' : self ? `Killed by your own ${wname === 'RPG' ? 'rocket' : wname.toLowerCase()}` : 'Killed by ' + src.name;
-    $('deathHow').textContent = wname === 'Storm' ? 'Stay inside the circle.' : self ? 'Aim it a little further away.' : wname + (head ? ' \u00b7 headshot' : '');
+    $('deathBy').textContent = wname === 'Storm' ? 'The storm got you' : own ? `Killed by your own ${wname === 'RPG' ? 'rocket' : wname.toLowerCase()}` : 'Killed by ' + src.name;
+    $('deathHow').textContent = wname === 'Storm' ? 'Stay inside the circle.' : own ? 'Aim it a little further away.' : wname + (head ? ' \u00b7 headshot' : '');
+    if (own && by) $('deathHow').textContent += ` ${by.name} gets the kill.`;
+    if (down) { // finished off, or bled out, while down
+      const fin = src && src !== t;
+      $('deathBy').textContent = fin ? 'Finished off by ' + src.name : 'You bled out';
+      $('deathHow').textContent = fin ? wname + (head ? ' \u00b7 headshot' : '') : 'Nobody got to you in time.';
+    }
     if (oneLife()) $('deathHow').textContent += ` \u00b7 you placed #${brAlive().length + 1}`;
     $('death').hidden = false; $('scope').hidden = true;
     deathButtons();
@@ -618,6 +667,79 @@ function kill(t, src, wname, head) {
   }
 }
 
+// ---------- knocked down (battle royale squads) ----------
+// While a squadmate still stands, what would kill you knocks you down instead: you crawl, can't shoot, heal or use
+// anything, and bleed out unless a squadmate holds E over you for a few seconds. Hits while you're down drain the same
+// bar; whoever finishes you (or knocked you, if you bleed out) gets the kill. With nobody left standing you're out.
+// Like health, the knock is the victim's own: their client (or the bot host) runs it and tells everyone else.
+const standing = e => isUp(e) && !e.knock;
+const mateUp = t => ents.some(e => e !== t && sameTeam(e, t) && inMatch(e) && standing(e));
+const canKnock = t => squadsOn() && t.team !== undefined && mateUp(t);
+function knockDown(t, src, wname, head) {
+  const by = src && src !== t && !sameTeam(src, t) ? src : creditFor(t, src);
+  t.knock = { hp: KNOCK.hp, by, wname, head }; t.hp = 0;
+  t.useT = null; t.rev = null; t.reloading = false; t.sprint = false; t.slide = 0; t.crouchOn = false;
+  if (t.vehicle) exitVehicle(t);
+  addFeed(by, t, wname, head, true);
+  if (t.isPlayer) { zoomed = false; $('scope').hidden = true; closeInv(false); shake = Math.max(shake, 0.25); toast('Knocked down: crawl to your squad'); }
+  if (by && by.isPlayer) { sfx.kill(); toast('Knocked <em></em>', t.name, head); }
+  if (mode === 'online' && (t.isPlayer || t.ai)) netEvent('kn', idOf(t), idOf(by), WNAMES.indexOf(wname), head ? 1 : 0);
+  scoresChanged();
+}
+function finishKnock(t) { const k = t.knock; kill(t, k.by, k.wname, k.head); }
+// the owner's side, every frame: bleed (not while someone's reviving), and out once the squad has nobody standing
+function updateKnock(e, dt) {
+  const k = e.knock; if (!k || !e.alive) return;
+  if (!mateUp(e)) return finishKnock(e);
+  if (!reviverOf(e)) k.hp -= KNOCK.bleed * dt;
+  if (k.hp <= 0) finishKnock(e);
+}
+// who someone is reviving (players and the host's bots send it), who's reviving someone, and how far along
+export const revTarget = e => (e.remote ? (e.revId ? byId(e.revId) : null) : e.rev ? e.rev.who : null);
+export const reviverOf = k => ents.find(e => e !== k && standing(e) && revTarget(e) === k) || null;
+export const revProg = e => (e.remote ? e.revP || 0 : e.rev ? clamp((now - e.rev.start) / KNOCK.revive, 0, 1) : 0);
+export const healOf = e => (e.remote ? e.healT : e.useT && e.useT.type) || null;
+const healProg = e => (e.remote ? e.healP || 0 : e.useT ? clamp((now - e.useT.start) / (e.useT.end - e.useT.start), 0, 1) : 0);
+// the nearest squadmate down within reach
+export function nearKnocked(e) {
+  let best = null, bd = KNOCK.reach;
+  for (const o of ents) if (o !== e && o.knock && sameTeam(o, e) && isUp(o)) { const d = o.pos.distanceTo(e.pos); if (d < bd) { bd = d; best = o; } }
+  return best;
+}
+export function startRevive(e, k) {
+  if (e.knock || !e.alive || e.rev || !k) return;
+  e.rev = { who: k, start: now }; e.useT = null; e.reloading = false; e.sprint = false;
+}
+// the reviver's side: let go of E, move, or drift off and it stops; done, the one who was down gets up (theirs to apply)
+function updateRevive(e) {
+  const r = e.rev; if (!r) return;
+  const k = r.who;
+  if (!e.alive || e.knock || !k.knock || !isUp(k) || k.pos.distanceTo(e.pos) > KNOCK.reach + 0.8 || (e.isPlayer && (!bound('use') || movingKeys()))) { e.rev = null; return; }
+  if (now < r.start + KNOCK.revive) return;
+  e.rev = null;
+  if (k.remote) netEvent('rv', k.peer, idOf(e)); else revived(k, e);
+  if (e.isPlayer) { sfx.heal(); toast('Revived <em></em>', k.name, false); }
+}
+export function revived(k, by) {
+  if (!k.knock) return;
+  k.knock = null; k.hp = KNOCK.back; k.lastHurt = now;
+  if (k.isPlayer) { sfx.heal(); toast('Back up: revived by <em></em>', by ? by.name : 'your squad', false); }
+  if (k.ai) k.ai.goal = null;
+}
+// what the bar under the crosshair shows for someone: going down, reviving, being revived, or healing
+export function actionOf(e) {
+  if (!e || !e.alive) return null;
+  const me = e === player, nm = me ? '' : e.name + ': ';
+  if (e.knock) {
+    const r = reviverOf(e);
+    return r ? { name: `${r === player ? 'You are' : r.name + ' is'} reviving ${me ? 'you' : e.name}`, k: revProg(r) }
+      : { name: me ? 'Knocked down \u00b7 bleeding out' : `${e.name} is down`, k: clamp(e.knock.hp / KNOCK.hp, 0, 1), down: true };
+  }
+  const rv = revTarget(e); if (rv) return { name: `${nm}Reviving ${rv === player ? 'you' : rv.name}`, k: revProg(e) };
+  const h = healOf(e); if (h) return { name: `${nm}${HEALS[h].name}\u2026`, k: healProg(e) };
+  return null;
+}
+
 // ---------- thrown equipment and rockets ----------
 // Every client flies every grenade and rocket; each applies the blast only to what it owns (see appliesHere).
 const nades = [];
@@ -628,7 +750,7 @@ const nadeMats = {
 };
 const nadeG = new THREE.SphereGeometry(0.15, 10, 8);
 export function throwNade(e) {
-  if (now < e.nadeReady || !e.alive || !nadesOn() || e.drop || e.vehicle) return;
+  if (now < e.nadeReady || !e.alive || !nadesOn() || e.drop || e.vehicle || e.knock) return;
   if (oneLife() && !(e.frags > 0)) { if (e.isPlayer) toast('No frags: find them in chests'); return; }
   const type = oneLife() ? 'frag' : THROWABLES[e.nade] ? e.nade : 'frag';
   e.nadeReady = now + (oneLife() ? FRAGS.cd : THROWABLES[type].cd);
@@ -964,6 +1086,7 @@ function pressCode(code) {
   if (a === 'ping') { if (MM.big) pingMap(); else pingAim(); return; }
   if (!player.alive || !a) return;
   if (player.drop) { if (a === 'jump') dropPress(player); return; }
+  if (player.knock) return; // down: crawling is all you can do
   if (a === 'w1') switchWeapon(player, slotIdx(player, 0));
   else if (a === 'w2') switchWeapon(player, slotIdx(player, 1));
   else if (a === 'w3') switchWeapon(player, slotIdx(player, 2));
@@ -981,7 +1104,7 @@ function pressCode(code) {
 }
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('wheel', e => { // next or previous gun, in slot order
-  if (state !== 'playing' || !player.alive || player.drop || invOpen) return;
+  if (state !== 'playing' || !player.alive || player.drop || player.knock || invOpen) return;
   const order = slotOrder(player), n = order.length, k = order.indexOf(player.weapon);
   switchWeapon(player, order[(k + (e.deltaY > 0 ? 1 : n - 1)) % n]);
 }, { passive: true });
@@ -1096,6 +1219,7 @@ function updatePlayer(dt) {
     if (shake > 0 && !reduceMotion) camera.position.add(new V3(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(shake * 0.3));
     return;
   }
+  if (p.knock) return crawl(p, dt, wish);
   const w = p.guns[p.weapon], firing = bound('shoot') || fireLatch;
   zoomed = bound('scope') && !p.reloading && w.kind !== 'melee';
 
@@ -1160,6 +1284,17 @@ function updatePlayer(dt) {
   const bobY = reduceMotion ? 0 : Math.sin(vm.bob * 2) * 0.04 * Math.min(1, sp / 6);
   camera.position.set(p.pos.x, p.pos.y + EYE * poseK(p) + bobY, p.pos.z);
   camera.rotation.set(p.pitch, p.yaw, reduceMotion ? 0 : p.slideK * 0.07);
+  if (shake > 0 && !reduceMotion) camera.position.add(new V3(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(shake * 0.3));
+}
+
+// knocked down: crawl, look round, nothing else
+function crawl(p, dt, wish) {
+  zoomed = false; fireLatch = false; crouchTap = false; p.sprint = false; p.slide = 0; p.slideK = 0; p.crouch = 1;
+  const k = Math.min(1, (p.onGround ? 10 : 3) * dt);
+  p.vel.x += (wish.x * KNOCK.speed - p.vel.x) * k; p.vel.z += (wish.z * KNOCK.speed - p.vel.z) * k;
+  moveEntity(p, dt);
+  camera.position.set(p.pos.x, p.pos.y + EYE * poseK(p), p.pos.z);
+  camera.rotation.set(p.pitch, p.yaw, reduceMotion ? 0 : 0.1);
   if (shake > 0 && !reduceMotion) camera.position.add(new V3(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(shake * 0.3));
 }
 
@@ -1318,19 +1453,25 @@ function renderInv() {
     el.addEventListener('dragend', () => { invDrag = -1; renderInv(); });
     slots.append(el);
   }
-  const row = (box, color, name, have, max, use) => {
+  // drop: { kind, type, what } puts some down at your feet (for a squadmate, say)
+  const row = (box, color, name, have, max, use, drop) => {
     const r = document.createElement(use ? 'button' : 'div'); r.className = 'invItem';
     if (use) { r.classList.add('invUse'); r.title = 'Click to use'; r.disabled = !(have > 0); r.addEventListener('click', () => { closeInv(); startHeal(player, use); }); }
     const sw = document.createElement('i'); sw.style.background = color; const n = document.createElement('b'); n.textContent = name;
-    const c = document.createElement('span'); c.textContent = `${have | 0} / ${max}`; r.append(sw, n, c); box.append(r);
+    const c = document.createElement('span'); c.textContent = `${have | 0} / ${max}`; r.append(sw, n, c);
+    if (!drop) { box.append(r); return; }
+    const wrap = document.createElement('div'), d = document.createElement('button'); wrap.className = 'invRow';
+    d.type = 'button'; d.className = 'invDrop'; d.textContent = 'Drop'; d.title = `Drop ${drop.what} at your feet`; d.disabled = !(have > 0) || !!p.knock;
+    d.addEventListener('click', ev => { ev.stopPropagation(); dropStuff(player, drop.kind, drop.type); renderInv(); });
+    wrap.append(r, d); box.append(wrap);
   };
   const am = $('invAmmo'); am.textContent = '';
-  for (const k of AMMO_KEYS) row(am, '#' + AMMO[k].color.toString(16).padStart(6, '0'), AMMO[k].name, p.res[k], AMMO[k].max);
+  for (const k of AMMO_KEYS) row(am, '#' + AMMO[k].color.toString(16).padStart(6, '0'), AMMO[k].name, p.res[k], AMMO[k].max, null, { kind: 'ammo', type: k, what: `${AMMO[k].pack} ${AMMO[k].name.toLowerCase()}` });
   const hl = $('invHeals'); hl.textContent = '';
-  row(hl, '#f4f1e8', `Bandages (${keyName(binds.bandage)})`, p.heals.bandage, HEALS.bandage.max, 'bandage');
-  row(hl, '#d9452f', `Medkits (${keyName(binds.medkit)})`, p.heals.medkit, HEALS.medkit.max, 'medkit');
-  row(hl, '#6b7a45', `Frags (${keyName(binds.nade)} to throw)`, p.frags, FRAGS.max);
-  const note = document.createElement('div'); note.className = 'invItem'; note.textContent = 'Click one to use it. Stand still.'; note.style.color = 'var(--muted)'; note.style.fontSize = '11px'; hl.append(note);
+  row(hl, '#f4f1e8', `Bandages (${keyName(binds.bandage)})`, p.heals.bandage, HEALS.bandage.max, 'bandage', { kind: 'heal', type: 'bandage', what: 'a bandage' });
+  row(hl, '#d9452f', `Medkits (${keyName(binds.medkit)})`, p.heals.medkit, HEALS.medkit.max, 'medkit', { kind: 'heal', type: 'medkit', what: 'a medkit' });
+  row(hl, '#6b7a45', `Frags (${keyName(binds.nade)} to throw)`, p.frags, FRAGS.max, null, { kind: 'frag', what: 'a frag' });
+  const note = document.createElement('div'); note.className = 'invItem'; note.textContent = 'Click a heal to use it (stand still). Drop puts some at your feet for a squadmate.'; note.style.color = 'var(--muted)'; note.style.fontSize = '11px'; hl.append(note);
   $('invHint').textContent = `${keyName(binds.inv)} or Esc to close`;
 }
 function showTip(g, ev) {
@@ -1370,10 +1511,11 @@ function updateModeUI() {
   $('gAim').hidden = online; // aim trainer is solo
   const fighting = !['zombies', 'aim'].includes(g), tdm = g === 'tdm';
   $('rowTs').hidden = !tdm; $('rowLim').hidden = !tdm; $('rowSide').hidden = !tdm || !online;
-  const sq = clamp(settings.sq | 0, 1, 4); $('rowSq').hidden = $('rowHok').hidden = g !== 'br';
+  const sq = clamp(settings.sq | 0, 1, 4), fill = settings.fill !== 0; $('rowSq').hidden = $('rowHok').hidden = g !== 'br';
+  $('rowFill').hidden = g !== 'br' || sq === 1;
   $('sqHelp').textContent = sq === 1 ? 'Everyone for themselves.'
-    : online ? `Players in this room team up ${sq} to a squad, in the order they join; bots fill the empty seats. No friendly fire.`
-    : `You and ${sq - 1} bot${sq > 2 ? 's' : ''} against squads of ${sq} bots. No friendly fire.`;
+    : online ? `Players in this room team up ${sq} to a squad, in the order they join; a party of 2 to 4 always shares one${fill ? ', and bots fill the empty seats' : ''}. Down, not out: squadmates can revive you.`
+    : `${fill ? `You and ${sq - 1} bot${sq > 2 ? 's' : ''}` : 'You on your own'} against squads of ${sq} bots. Down, not out: squadmates can revive you.`;
   $('rowBots').hidden = !fighting || tdm; $('rowDiff').hidden = !fighting;
   $('b0').hidden = !online; $('b11').hidden = g !== 'br'; // online a room can have no bots; battle royale takes a crowd
   if (($('b0').hidden && settings.bots === 0) || ($('b11').hidden && settings.bots === 11)) $('botSeg').querySelector('[data-v="5"]').click();
@@ -1739,7 +1881,7 @@ const beamG = new THREE.CylinderGeometry(0.07, 0.07, 1, 8);
 const beamMats = new Map();
 const beamMat = c => { if (!beamMats.has(c)) beamMats.set(c, new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.38, depthWrite: false })); return beamMats.get(c); };
 const ammoMats = {}; for (const k in AMMO) ammoMats[k] = new THREE.MeshLambertMaterial({ color: AMMO[k].color });
-const AMMO_KEYS = Object.keys(AMMO), HEAL_KEYS = Object.keys(HEALS);
+export const AMMO_KEYS = Object.keys(AMMO), HEAL_KEYS = Object.keys(HEALS);
 function chestMesh(c) {
   const g = new THREE.Group();
   piece(g, LM.wood, 1.1, 0.5, 0.7, 0, 0.25, 0);
@@ -1862,6 +2004,17 @@ function dropItems(e, list) {
   if (mode === 'online') { spillItems(net.myPeer + ':' + (net.seq + 1), list, x, y, z); netEvent('dp', x, y, z, ...encItems(list)); }
   else spillItems('l' + ++CH.seq, list, x, y, z);
 }
+// battle royale: put some of what you carry at your feet: a pack of ammo (or what's left of one), a heal or a frag
+function dropStuff(e, kind, type) {
+  if (!oneLife() || !e.alive || e.drop || e.knock) return;
+  let qty = 0;
+  if (kind === 'ammo') { qty = Math.min(e.res[type] | 0, AMMO[type].pack); e.res[type] -= qty; }
+  else if (kind === 'heal') { qty = e.heals[type] > 0 ? 1 : 0; e.heals[type] -= qty; if (qty && e.useT && e.useT.type === type && !e.heals[type]) e.useT = null; }
+  else if (kind === 'frag') { qty = e.frags > 0 ? 1 : 0; e.frags -= qty; }
+  if (!qty) return;
+  dropItems(e, [kind === 'frag' ? { kind, qty } : { kind, type, qty }]);
+  if (e.isPlayer) sfx.pick();
+}
 // battle royale: put a gun down at your feet (never the knife). The gun in your hands goes back to the knife.
 function dropGun(e, i) {
   if (!oneLife() || !e.alive || e.drop) return;
@@ -1937,6 +2090,7 @@ export const knifeFull = p => p.guns.length >= MAX_SLOTS && p.guns[p.weapon].kin
 // E: open the chest in front of you, or trade the gun in your hands for the one at your feet
 function useKey(p) {
   if (p.vehicle) return exitVehicle(p);
+  const kd = nearKnocked(p); if (kd) return startRevive(p, kd); // a squadmate down: hold E to get them up
   const v = nearVehicle(p); if (v) return enterVehicle(p, v);
   if (!oneLife()) return;
   const c = nearChest(p); if (c) return openChest(c.i, p);
@@ -2000,7 +2154,7 @@ function pickHeal(e) {
 }
 const movingKeys = () => ['fwd', 'back', 'left', 'right', 'jump'].some(bound);
 export function startHeal(e, want) {
-  if (!oneLife() || e.useT || !e.alive || e.drop || e.vehicle) return;
+  if (!oneLife() || e.useT || !e.alive || e.drop || e.vehicle || e.knock) return;
   if (e.isPlayer && (movingKeys() || !e.onGround || Math.hypot(e.vel.x, e.vel.z) > 1.5)) { toast('Stand still to heal'); return; }
   if (want) { // the player asked for this one
     const H = HEALS[want];
@@ -2325,7 +2479,7 @@ function startGame(fromLink = false) {
   endSpec();
   if (mode === 'online' || !versus()) setupBots(0, settings.diff);
   else if (teamsOn()) { const ts = clamp(settings.ts | 0, 1, 6); setupBots(ts * 2 - 1, settings.diff, [...Array(ts - 1).fill(0), ...Array(ts).fill(1)]); } // you plus ts - 1 bots, against ts bots
-  else if (squadsOn()) { const sq = cfg().sq, n = Math.min(11, Math.max(settings.bots, sq)); setupBots(n, settings.diff, botSquads([player], sq, n)); } // your squad first, then bot squads
+  else if (squadsOn()) { const sq = cfg().sq, n = Math.min(11, Math.max(settings.bots, sq)); setupBots(n, settings.diff, botSquads([player], sq, n, cfg().fill !== 0)); } // your squad first, then bot squads
   else { const c = cfg(); setupBots(c.bots, c.diff); } // (Frost Fest: always 7 hard bots)
   player.kills = player.deaths = 0; player.nadeReady = 0;
   respawn(player); dressVM(); refreshVM();
@@ -2435,7 +2589,7 @@ function renderLobbyUI(groups) {
   const isHost = net.host === net.myPeer;
   setText('lobbyTitle', `Room ${settings.room}`);
   const c = cfg(), bits = [GAMES[game], MAPS[net.map || currentMap]];
-  if (squadsOn()) bits.push(SQUAD_NAMES[c.sq]); else if (teamsOn()) bits.push(`${c.ts}v${c.ts}`);
+  if (squadsOn()) bits.push(SQUAD_NAMES[c.sq] + (c.fill === 0 ? ', no fill' : '')); else if (teamsOn()) bits.push(`${c.ts}v${c.ts}`);
   if (oneLife() && c.hok) bits.push(`+${c.hok} HP per kill`);
   setText('lobbyInfo', bits.join(' \u00b7 '));
   const listKey = JSON.stringify([isHost, net.host, game, cfg().sq, groups.map(g => [g.t, g.list.map(e => [e.peer, e.name, e.color, e.lobby, e.ready, e.lv]), net.ready])]);
@@ -2524,7 +2678,10 @@ function renderLobbySet(isHost, busy) {
   pick('Game', Object.entries(GAMES).filter(([k]) => k !== 'aim'), game, v => send({ game: v }));
   pick('Map', Object.entries(MAPS), map, v => send({ map: v }));
   if (game === 'br') {
-    pick('Squads', [[1, 'Solo'], [2, 'Duos'], [3, 'Trios'], [4, 'Squads']], c.sq || 1, v => send({ sq: +v }));
+    // a party of 2 to 4 stays in one squad, so only the sizes it fits in (the server holds to that too)
+    const party = 1 + net.remotes.size, least = party >= 2 && party <= 4 ? party : 1;
+    pick('Squads', [[1, 'Solo'], [2, 'Duos'], [3, 'Trios'], [4, 'Squads']].filter(([v]) => v >= least), Math.max(c.sq || 1, least), v => send({ sq: +v }));
+    if ((c.sq | 0) > 1) pick('Empty seats', [[1, 'Fill with bots'], [0, 'No fill']], c.fill === 0 ? 0 : 1, v => send({ fill: +v }));
     pick('Heal on kill', [[0, 'Off'], [25, '+25 HP'], [50, '+50 HP']], c.hok || 0, v => send({ hok: +v }));
   }
   if (game === 'tdm') {
@@ -2590,6 +2747,7 @@ segment('limSeg', 'lim', v => +v);
 segment('sideSeg', 'side', v => v, updateModeUI);
 segment('sqSeg', 'sq', v => +v, updateModeUI);
 segment('hokSeg', 'hok', v => +v);
+segment('fillSeg', 'fill', v => +v, updateModeUI);
 segment('pubSeg', 'pub', v => v === 'true');
 segment('diffSeg', 'diff', v => v);
 if (!GAMES[settings.game] || (settings.game === EVENT.game && !eventOn())) settings.game = 'ffa';
@@ -2699,7 +2857,9 @@ function tick(t) {
     for (const e of ents) {
       if (!e.isPlayer && !e.remote && !e.zombie) updateBot(e, dt);
       if (e.reloading && now >= e.reloadEnd) finishReload(e);
+      if (e.rlStop && !e.reloading) { if (now < e.reloadEnd - 0.05) e.rlStop(); e.rlStop = null; } // cut short: so is its sound
       if (e.useT && !e.remote) updateHeal(e);
+      if (!e.remote && (e.knock || e.rev)) { updateKnock(e, dt); updateRevive(e); }
     }
     if (mode === 'online') { updateRemotes(dt); updateRoster(); }
     updateZombies(dt); updateAim(); updateStorm(dt); updateFlight(); updateSupply(dt); updateLoot(dt); updateVehicles(dt);
@@ -2717,7 +2877,7 @@ function tick(t) {
 
   // view model
   const healing = state !== 'menu' && player.alive && !player.drop && !!player.useT;
-  const showVM = state !== 'menu' && state !== 'lobby' && player.alive && !player.drop && !player.vehicle && (healing || !(zoomed && camera.fov < 40));
+  const showVM = state !== 'menu' && state !== 'lobby' && player.alive && !player.drop && !player.vehicle && !player.knock && (healing || !(zoomed && camera.fov < 40));
   vm.root.visible = !healing; healVM.root.visible = healing;
   if (healing) poseHealVM(player.useT);
   if (showVM && !healing) {
@@ -2759,7 +2919,7 @@ if (location.hostname === 'localhost') window.__spud = { step: n => { for (let i
   CH, FLIGHT, useKey, startHeal, get LIMIT() { return LIMIT; },
   applyRemote: (id, s, seat) => applyRemote(id, s, seat), renderLobbyUI: () => renderLobbyUI(lobbyGroups()), enterLobby: () => enterLobby(),
   camAt: (x, y, z, tx, ty, tz) => { camHold = true; camera.position.set(x, y, z); camera.lookAt(tx, ty, tz); }, boxes, STAIRS, PADS, SPAWNS, startGame, toMenu: () => toMenu(), get game() { return game; }, get state() { return state; }, get now() { return now; },
-  kill: (t, by = player) => kill(t, by, "Pistol", false), squadmates: () => squadmates(), winnerNow: () => winnerNow() };
+  kill: (t, by = player) => kill(t, by, "Pistol", false), damage: (t, n, by) => damage(t, n, by, "SMG", false), actionOf, nearKnocked, squadmates: () => squadmates(), winnerNow: () => winnerNow() };
 resize();
 dressVM(); updateProfile();
 setMap(settings.map);
