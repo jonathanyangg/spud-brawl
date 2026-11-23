@@ -1014,19 +1014,6 @@ function renderBinds() {
     b.addEventListener('click', ev => { ev.stopPropagation(); startRebind(k); });
     row.append(s, b); list.append(row);
   }
-  renderKeyHelp();
-}
-function renderKeyHelp() {
-  const kb = c => `<kbd>${keyName(c).replace(/[&<>"']/g, ch => '&#' + ch.charCodeAt(0) + ';')}</kbd>`;
-  $('keyHelp').innerHTML = [
-    `${kb(binds.fwd)}${kb(binds.left)}${kb(binds.back)}${kb(binds.right)} Move`,
-    `${kb(binds.jump)} Jump`, `${kb(binds.sprint)} Sprint`, `${kb(binds.crouch)} Crouch \u00b7 slide while sprinting`,
-    `${kb(binds.shoot)} Shoot`, `${kb(binds.scope)} Aim down sights`,
-    `${kb(binds.w1)}${kb(binds.w2)}${kb(binds.w3)}${kb(binds.w4)} ${kb(binds.swap)} Switch weapon`,
-    `${kb(binds.use)} Open chest \u00b7 pick up &nbsp;${kb(binds.dropGun)} Drop weapon &nbsp;${kb(binds.bandage)} Bandage &nbsp;${kb(binds.medkit)} Medkit &nbsp;${kb(binds.slotL)}${kb(binds.slotR)} Reorder guns &nbsp;${kb(binds.inv)} Inventory (battle royale)`,
-    `${kb(binds.reload)} Reload`, `${kb(binds.nade)} Throw equipment`,
-    `${kb(binds.map)} Full map &nbsp;${kb(binds.ping)} Ping (click the full map to ping there) &nbsp;${kb(binds.scores)} Scores &nbsp;${kb(binds.mute)} Mute`,
-  ].map(s => `<div>${s}</div>`).join('');
 }
 function startRebind(k) {
   rebinding = rebinding === k ? null : k;
@@ -2596,7 +2583,6 @@ $('ctrlReset').addEventListener('click', () => {
   Object.assign(binds, DEFAULT_BINDS); rebinding = null; settings.binds = { ...binds }; saveSettings();
   $('bindMsg').textContent = 'Controls are back to the defaults.'; renderBinds();
 });
-renderKeyHelp();
 
 // ---------- invite links ----------
 // A link ending in #room=<code> opens the game in online mode with that room filled in.
