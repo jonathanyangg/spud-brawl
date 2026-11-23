@@ -45,8 +45,11 @@ const server = createServer(async (req, res) => {
 // host: the player whose game runs the bots (and hands them on when they leave).
 const rooms = new Map();
 const perIp = new Map(); // address -> open sockets
-// behind a host's proxy every socket comes from the proxy, so use the address it saw (the last x-forwarded-for entry)
-const addrOf = req => String(req.headers['x-forwarded-for'] || '').split(',').pop().trim() || req.socket.remoteAddress || '?';
+// behind a host's proxy every socket comes from the proxy, so use the address it saw (the last x-forwarded-for entry).
+// Only then: with no proxy in front, anyone could send that header and dodge the per-address cap. TRUST_PROXY=1 or 0
+// says which; unset, it's on for Render (which sets RENDER) and off everywhere else.
+const TRUST_PROXY = process.env.TRUST_PROXY ? process.env.TRUST_PROXY === '1' : !!process.env.RENDER;
+const addrOf = req => (TRUST_PROXY && String(req.headers['x-forwarded-for'] || '').split(',').pop().trim()) || req.socket.remoteAddress || '?';
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024 });
 
 wss.on('connection', (ws, req) => {

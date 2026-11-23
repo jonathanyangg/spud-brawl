@@ -1278,7 +1278,7 @@ const gunStats = g => {
   return [['Damage', `${Math.round(g.dmg)}${g.pellets > 1 ? ' \u00d7 ' + g.pellets : ''}`], ['Headshot', '\u00d7' + g.head],
     ['Fire rate', `${(1 / g.rate).toFixed(1)}/s`], ['Magazine', g.kind === 'melee' ? '\u2013' : String(g.mag)],
     ['Reload', g.kind === 'melee' ? '\u2013' : g.reload.toFixed(1) + 's'], ['Range', g.range + ' m'],
-    ['Ammo', at ? AMMO[at].name : 'none'], ['Rarity', g.kind === 'melee' ? '\u2013' : R.name]];
+    ['Ammo', at ? AMMO[at].name : 'none'], ['Rarity', g.kind === 'melee' ? '\u2013' : R.name], ...(g.speed && g.speed !== 1 ? [['Move speed', `+${Math.round((g.speed - 1) * 100)}%`]] : [])];
 };
 {
   const dz = $('invDrop'), inv = $('inv');

@@ -8,7 +8,7 @@ export const MOVE = { walk: 6.6, sprint: 9.4, crouch: 3.3, ads: 4.0, slide: 12.5
 // kind: gun (hitscan), rpg (fires a rocket), melee (short hitscan, no ammo). level: player level that unlocks it.
 // noAtt: takes no attachments; noHead: can't headshot (camos skip the headshot goals); speed: move speed multiplier
 export const WEAPONS = [
-  { name: 'SMG',     dmg: 13, head: 1.6, rate: 0.085, mag: 30, reload: 1.6, spread: 0.022, pellets: 1, range: 70,  auto: true,  kick: 0.010, pref: 13, fov: 58 },
+  { name: 'SMG',     dmg: 13, head: 1.6, rate: 0.085, mag: 30, reload: 1.6, spread: 0.022, pellets: 1, range: 70,  auto: true,  kick: 0.010, pref: 13, fov: 58, speed: 1.08 }, // lighter than the AR: you move faster with it
   { name: 'Shotgun', dmg: 11, head: 1.4, rate: 0.85,  mag: 6,  reload: 2.0, spread: 0.075, pellets: 9, range: 30,  auto: false, kick: 0.055, pref: 6,  fov: 64 },
   { name: 'Sniper',  dmg: 75, head: 2.0, rate: 1.15,  mag: 5,  reload: 2.4, spread: 0.002, pellets: 1, range: 140, auto: false, kick: 0.07,  pref: 24, fov: 22, scope: true },
   { name: 'AR',      dmg: 20, head: 1.7, rate: 0.105, mag: 30, reload: 2.0, spread: 0.011, pellets: 1, range: 100, auto: true,  kick: 0.015, pref: 20, fov: 50 },

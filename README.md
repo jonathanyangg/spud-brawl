@@ -103,7 +103,7 @@ WASD move, Shift sprint, C crouch, Space jump, right-click aim down sights, 1/2/
 
 ## Weapons
 
-Six weapons; you carry three: SMG, Shotgun, Sniper, AR, RPG (unlocks at level 6, splash damage, rocket-jumps hurt) and Knife (faster movement). One throwable: Frag, Stun (slows movement and aim; level 3) or Flashbang (whites out anyone looking at it; level 5).
+Six weapons; you carry three: SMG, Shotgun, Sniper, AR, RPG (unlocks at level 6, splash damage, rocket-jumps hurt) and Knife (faster movement; the SMG also moves you 8% faster). One throwable: Frag, Stun (slows movement and aim; level 3) or Flashbang (whites out anyone looking at it; level 5).
 
 **Slide:** press crouch while sprinting. **Slide cancel:** press crouch again (or jump) mid-slide to pop straight back into a sprint with the slide's speed. Chain them to move faster than a plain sprint.
 
@@ -142,4 +142,4 @@ In Zombies, one player runs the zombies for the room (the lowest player id still
 
 ## Deploy
 
-Any host that runs a long-lived Node process with WebSockets works (Render, Railway, Fly). Build: `npm install`, start: `npm start`. It listens on `$PORT`. Accounts and payments read `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` and optionally `SITE_URL` (see [SETUP.md](SETUP.md)).
+Any host that runs a long-lived Node process with WebSockets works (Render, Railway, Fly). Build: `npm install`, start: `npm start`. It listens on `$PORT`. Accounts and payments read `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` and optionally `SITE_URL` (see [SETUP.md](SETUP.md)). `TRUST_PROXY=1` makes the per-address connection cap use the proxy's `x-forwarded-for`; it's on by default on Render and off elsewhere, so set it on any other host that runs behind a proxy (Railway, Fly), and leave it off with no proxy in front.

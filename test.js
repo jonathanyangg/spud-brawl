@@ -370,8 +370,8 @@ const tick = () => new Promise(r => setTimeout(r, 100));
   for (const s of [calm, peer]) s.close();
 
   // small caps on a server of its own: 2 rooms, 3 sockets an address
-  const FP = 3993; await startServer(FP, { MAX_ROOMS: '2', MAX_PER_IP: '3' });
-  const at = (room, id) => new Promise((res, rej) => { const ws = new WebSocket(`ws://localhost:${FP}/ws?room=${room}&id=${id}&key=${keyOf(id)}`); ws.msgs = [];
+  const FP = 3993; await startServer(FP, { MAX_ROOMS: '2', MAX_PER_IP: '3', TRUST_PROXY: '0' });
+  const at = (room, id, ip, port = FP) => new Promise((res, rej) => { const ws = new WebSocket(`ws://localhost:${port}/ws?room=${room}&id=${id}&key=${keyOf(id)}`, ip ? { headers: { 'x-forwarded-for': ip } } : {}); ws.msgs = [];
     ws.on('message', d => ws.msgs.push(JSON.parse(d))); ws.on('close', c => { ws.code = c; }); ws.on('open', () => res(ws)); ws.on('error', rej); });
   const r1 = await at('r1', 'room1'), r2 = await at('r2', 'room2'), r3 = await at('r3', 'room3'); await tick();
   assert.ok(r3.msgs.some(m => m.t === 'full'), 'no third room');
@@ -379,10 +379,19 @@ const tick = () => new Promise(r => setTimeout(r, 100));
   assert.ok(!r1b.msgs.some(m => m.t === 'full'), 'existing rooms still take players');
   const r1c = await at('r1', 'room1c'); await tick();
   assert.equal(r1c.code, 1008, 'a fourth socket from one address is refused');
+  const r1x = await at('r1', 'room1x', '203.0.113.9'); await tick();
+  assert.equal(r1x.code, 1008, 'with no proxy trusted, a made-up x-forwarded-for gets round nothing');
   r1b.close(); await tick();
   const r1d = await at('r1', 'room1d'); await tick();
   assert.ok(r1d.code === undefined, 'a slot frees up when one closes');
   for (const s of [r1, r2, r1d]) s.close();
+  // behind a trusted proxy, each forwarded address has its own cap
+  const TP = 3992; await startServer(TP, { MAX_PER_IP: '1', TRUST_PROXY: '1' });
+  const p1 = await at('tp', 'prox1', '198.51.100.1, 10.0.0.1', TP), p2 = await at('tp', 'prox2', '10.9.9.9, 198.51.100.2', TP); await tick();
+  assert.ok(p1.code === undefined && p2.code === undefined, 'two forwarded addresses, one socket each');
+  const p3 = await at('tp', 'prox3', '198.51.100.7, 10.0.0.1', TP); await tick();
+  assert.equal(p3.code, 1008, 'the last forwarded entry (the one the proxy saw) is the address that counts');
+  for (const s of [p1, p2]) s.close();
   console.log('flood limits ok');
 }
 {
