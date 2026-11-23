@@ -9,7 +9,7 @@ import { setMusic, setMusicOn } from './music.js';
 import * as P from './progress.js';
 import { applyLook } from './skins.js';
 import { initArmory, openArmory } from './armory.js';
-import { initAccount, progressSaved } from './account.js';
+import { boards, initAccount, postScore, progressSaved } from './account.js';
 import { $, V3, clamp, rand } from './util.js';
 import { navPoint, setupBots, stairWaypoint, updateBot, updateRoster } from './bots.js';
 import {
@@ -2174,6 +2174,18 @@ function endZombies() {
   buildTable($('overTbl'));
   gainXP(P.XP.match + 60 * Z.wave, { match: true });
   showOverXp();
+  boardRow('zombies', Z.wave, player.kills | 0);
+}
+// the over card's leaderboard line: where this run put you, or how to get on the board
+function boardRow(board, score, extra) {
+  if (!boards.on) return;
+  const tbl = $('overTbl'), tr = document.createElement('tr'), a = document.createElement('td'), b = document.createElement('td');
+  a.textContent = 'Leaderboard'; tr.append(a, b); tbl.append(tr);
+  if (!boards.signedIn) { b.textContent = 'Sign in to post your runs'; return; }
+  b.textContent = 'Posting…';
+  postScore(board, score, extra, player.name).then(r => {
+    b.textContent = !r ? 'Could not post this run' : r.newBest ? `New best, #${r.rank}` : `Your best is #${r.rank}`;
+  });
 }
 
 // ---------- aim trainer: 60 seconds, hit as many targets as you can ----------
@@ -2213,6 +2225,7 @@ function endAim() {
   }
   gainXP(P.XP.match + AIM.hits * 8, { match: true });
   showOverXp(); stopAim();
+  boardRow('aim', AIM.hits, acc);
 }
 
 // ---------- state ----------

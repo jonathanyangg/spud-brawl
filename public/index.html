@@ -109,6 +109,7 @@
           </div>
         </div>
         <p class="help" id="acctMsg" aria-live="polite"></p>
+        <button class="btn ghost small" id="lbBtn" type="button">Leaderboards</button>
       </div>
       <div class="form">
         <div class="row">
@@ -349,6 +350,22 @@
       <div class="actions">
         <button class="btn" id="spinGo" type="button">Spin</button>
         <button class="btn ghost" id="spinDone" type="button">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="lbOv" hidden>
+    <div class="card" role="dialog" aria-modal="true" aria-labelledby="lbTitle">
+      <h2 id="lbTitle">Leaderboards</h2>
+      <div class="seg tabs" id="lbTabs" role="group" aria-label="Leaderboard">
+        <button type="button" data-v="aim" aria-pressed="true">Aim Trainer</button>
+        <button type="button" data-v="zombies" aria-pressed="false">Zombies</button>
+      </div>
+      <p class="help" id="lbHow"></p>
+      <ol id="lbList"></ol>
+      <p class="help" id="lbMine" aria-live="polite"></p>
+      <div class="actions">
+        <button class="btn ghost" id="lbDone" type="button">Done</button>
       </div>
     </div>
   </div>

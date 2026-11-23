@@ -3,6 +3,7 @@
 // The client only asks: the server decides rewards, prices and balances (api.js).
 import * as P from './progress.js';
 import { SPIN, SPIN_TOTAL, spinLabel } from './economy.js';
+import { BOARDS } from './boards.js';
 
 const $ = id => document.getElementById(id);
 const AUTH_KEY = 'spudbrawl-auth';
@@ -208,6 +209,40 @@ function openCoins() {
 }
 function closeCoins() { $('coinOv').hidden = true; $('coinBtn').focus(); }
 
+// ---------- leaderboards ----------
+// anyone can look; signed in, your runs go up (your best stays) and your row is marked
+export const boards = { get on() { return !!cfg?.accounts; }, get signedIn() { return !!me; } };
+// after an Aim Trainer or Zombies run: { best, bestExtra, rank, newBest }, or null when signed out or it failed
+export async function postScore(board, score, extra, name) {
+  if (!me) return null;
+  try { return await api('/api/score', { board, score, extra, name }); } catch (e) { return null; }
+}
+let lbBoard = 'aim', lbReq = 0;
+async function showBoard(board) {
+  lbBoard = board; const req = ++lbReq, B = BOARDS[board];
+  for (const b of $('lbTabs').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.v === board));
+  $('lbHow').textContent = board === 'aim' ? 'Most hits in 60 seconds; accuracy breaks ties.' : 'Highest wave reached; kills break ties.';
+  const list = $('lbList'); list.textContent = ''; $('lbMine').textContent = 'Loading…';
+  let out;
+  try {
+    const t = me ? await token() : null;
+    const r = await fetch(`/api/leaderboard?board=${board}`, { headers: t ? { authorization: `Bearer ${t}` } : {} });
+    out = await r.json(); if (!r.ok) throw new Error(out.error);
+  } catch (e) { if (req === lbReq) $('lbMine').textContent = 'Could not load the leaderboard. Try again in a moment.'; return; }
+  if (req !== lbReq) return; // switched tabs meanwhile
+  out.top.forEach((r, i) => {
+    const li = el('li', r.me ? 'me' : null);
+    const sc = el('span', null, B.score(r.score)); sc.append(el('small', null, B.extra(r.extra)));
+    li.append(el('i', null, `${i + 1}.`), el('b', null, r.name), sc); list.append(li);
+  });
+  if (!out.top.length) list.append(el('li', 'empty', 'No scores yet. Be the first.'));
+  $('lbMine').textContent = !me ? `Sign in to put your ${B.name} runs on the board.`
+    : !out.mine ? `You have no ${B.name} score yet. Play a run while signed in.`
+    : `Your best: ${B.score(out.mine.score)}, ${B.extra(out.mine.extra)}${out.mine.rank ? ` (#${out.mine.rank})` : ''}.`;
+}
+function openBoards() { $('lbOv').hidden = false; showBoard(lbBoard); $('lbDone').focus(); }
+function closeBoards() { $('lbOv').hidden = true; $('lbBtn').focus(); }
+
 // After a paid checkout the webhook credits coins a moment later: poll a few times.
 async function awaitCoins(before) {
   for (let i = 0; i < 8 && me; i++) {
@@ -235,9 +270,13 @@ export async function initAccount(p, h) {
   $('spinDone').addEventListener('click', closeSpin);
   $('coinBtn').addEventListener('click', openCoins);
   $('coinDone').addEventListener('click', closeCoins);
+  $('lbBtn').addEventListener('click', openBoards);
+  $('lbDone').addEventListener('click', closeBoards);
+  for (const b of $('lbTabs').querySelectorAll('button')) b.addEventListener('click', () => showBoard(b.dataset.v));
   document.addEventListener('keydown', e => {
     if (e.code !== 'Escape') return;
     if (!$('spinOv').hidden) { e.preventDefault(); closeSpin(); } else if (!$('coinOv').hidden) { e.preventDefault(); closeCoins(); }
+    else if (!$('lbOv').hidden) { e.preventDefault(); closeBoards(); }
   });
   addEventListener('pagehide', () => { if (pushT) push(true); }); // don't lose the last few seconds of XP
   // a magic link opened in this same tab only changes the hash

@@ -24,8 +24,10 @@ Stripe vars are set, so nobody can pay without the webhook that credits them.
 1. Create a project at [supabase.com](https://supabase.com/dashboard) (free tier is fine). Pick a region near your
    Render region and save the database password somewhere; the game never needs it.
 2. **SQL Editor → New query**: paste all of [`supabase/schema.sql`](supabase/schema.sql) and run it. It makes the
-   `profiles` and `purchases` tables, the signup trigger, row level security (players can read only their own profile and
-   write nothing), and the spin, buy and credit functions that only the server can call. Running it twice is safe.
+   `profiles`, `purchases` and `scores` tables, the signup trigger, row level security (players can read only their own
+   profile and write nothing), and the spin, buy, credit and leaderboard functions that only the server can call. Running
+   it twice is safe, so after an update that changes it (the leaderboards added `scores` and `submit_score`), run the
+   whole file again.
 3. **Authentication → Sign In / Providers**: make sure **Email** is enabled. Magic links need no passwords; leave
    "Confirm email" on.
 4. **Authentication → URL Configuration**:

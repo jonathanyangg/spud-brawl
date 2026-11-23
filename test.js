@@ -412,7 +412,7 @@ const paidEvent = (id, metadata, extra = {}) => ({ id: 'evt_' + id, type: 'check
 // ---------- the whole API against a mock Supabase ----------
 const UA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', UB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const USERS = { 'tok-a': { id: UA, email: 'a@example.com' }, 'tok-b': { id: UB, email: 'b@example.com' } };
-const db = new Map(), purchases = new Set(), otp = [];
+const db = new Map(), purchases = new Set(), otp = [], scores = new Map(); // scores: uid:board -> row
 // Mirrors supabase/schema.sql: each rpc is one atomic step (JS is single-threaded, so it really is)
 const mock = createServer(async (req, res) => {
   const u = new URL(req.url, 'http://x'), chunks = []; for await (const c of req) chunks.push(c);
@@ -435,6 +435,20 @@ const mock = createServer(async (req, res) => {
     if (req.method === 'GET') return out(200, db.has(id) ? [db.get(id)] : []);
     if (req.method === 'POST') { if (!db.has(body.id)) db.set(body.id, { coins: 0, last_spin: null, owned: [], progress: null }); return out(201); }
     if (req.method === 'PATCH') { Object.assign(db.get(id), body); return out(204); }
+  }
+  if (u.pathname === '/rest/v1/scores' && req.method === 'GET') {
+    const board = (u.searchParams.get('board') || '').replace('eq.', ''), uid = (u.searchParams.get('user_id') || '').replace('eq.', '');
+    const rows = [...scores.values()].filter(r => r.board === board && (!uid || r.user_id === uid))
+      .sort((a, b) => b.score - a.score || b.extra - a.extra || a.at - b.at).slice(0, +(u.searchParams.get('limit') || 1000));
+    return out(200, rows.map(({ at, board: _, ...r }) => r));
+  }
+  if (u.pathname === '/rest/v1/rpc/submit_score') {
+    const k = `${body.uid}:${body.b}`, old = scores.get(k);
+    const better = !old || body.s > old.score || (body.s === old.score && body.x > old.extra);
+    const row = better ? { user_id: body.uid, board: body.b, name: body.nm, score: body.s, extra: body.x, at: Date.now() } : { ...old, name: body.nm };
+    scores.set(k, row);
+    const rank = 1 + [...scores.values()].filter(r => r.board === body.b && (r.score > row.score || (r.score === row.score && r.extra > row.extra))).length;
+    return out(200, [{ best: row.score, best_extra: row.extra, rank }]);
   }
   const row = body && db.get(body.uid);
   if (u.pathname === '/rest/v1/rpc/claim_spin') {
@@ -532,6 +546,21 @@ const AP = 3995; await startServer(AP, MOCK_ENV);
   r = await call(AP, 'POST', '/api/stripe/webhook', signed(paidEvent('cs_test_3', { uid: UA, coins: '99999' })));
   assert.equal(r.json.ignored, true, 'coins must match a pack'); assert.equal(db.get(UA).coins, 500);
   assert.equal((await call(AP, 'POST', '/api/stripe/webhook', signed(paidEvent('cs_test_4', { uid: UA, coins: '500' }), 'whsec_nope'))).status, 400);
+  // leaderboards: anyone reads; only signed-in players post, possible scores only, best kept, not too often
+  assert.equal((await call(AP, 'POST', '/api/score', { body: { board: 'aim', score: 10 } })).status, 401, 'posting needs a sign-in');
+  assert.equal((await call(AP, 'POST', '/api/score', { token: 'tok-a', body: { board: 'chess', score: 10 } })).status, 400, 'unknown board');
+  assert.equal((await call(AP, 'POST', '/api/score', { token: 'tok-a', body: { board: 'aim', score: 9999, extra: 50 } })).status, 400, 'impossible score');
+  assert.equal((await call(AP, 'POST', '/api/score', { token: 'tok-a', body: { board: 'aim', score: 12.5, extra: 50 } })).status, 400, 'whole numbers');
+  r = await call(AP, 'POST', '/api/score', { token: 'tok-a', body: { board: 'aim', score: 40, extra: 70, name: 'Ann​' } });
+  assert.deepEqual(r.json, { board: 'aim', best: 40, bestExtra: 70, rank: 1, newBest: true });
+  assert.equal((await call(AP, 'POST', '/api/score', { token: 'tok-a', body: { board: 'aim', score: 50, extra: 70 } })).status, 429, 'one run per 15 s');
+  r = await call(AP, 'POST', '/api/score', { token: 'tok-b', body: { board: 'aim', score: 55, extra: 60, name: 'Bo' } });
+  assert.equal(r.json.rank, 1); assert.equal(scores.get(`${UA}:aim`).name, 'Ann', 'names cleaned');
+  r = await call(AP, 'GET', '/api/leaderboard?board=aim');
+  assert.deepEqual(r.json, { board: 'aim', top: [{ name: 'Bo', score: 55, extra: 60 }, { name: 'Ann', score: 40, extra: 70 }], mine: null }, 'public, no ids');
+  r = await call(AP, 'GET', '/api/leaderboard?board=aim', { token: 'tok-a' });
+  assert.deepEqual(r.json.mine, { score: 40, extra: 70, rank: 2 }); assert.equal(r.json.top[1].me, true);
+  assert.equal((await call(AP, 'GET', '/api/leaderboard?board=nope')).status, 400);
   console.log('api ok');
 }
 

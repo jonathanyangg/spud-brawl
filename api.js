@@ -5,6 +5,7 @@
 import { randomInt } from 'node:crypto';
 import { loadProgress, mergeProgress, capGain } from './public/progress.js';
 import { pickSpin, spinState, SPIN_COOLDOWN_MS, COIN_PACKS, packById, buyCheck } from './public/economy.js';
+import { BOARDS, BOARD_TOP, scoreCheck, boardName } from './public/boards.js';
 
 const env = process.env;
 const SB_URL = (env.SUPABASE_URL || '').trim().replace(/\/+$/, '');
@@ -74,6 +75,31 @@ const cleanSave = (progress, owned) => loadProgress(JSON.stringify(progress ?? n
 // at: when the XP bucket was last drawn on (see capGain); kept with the save, never sent back
 const forStorage = ({ owned, ...save }, at) => ({ ...save, at });
 
+// ---------- leaderboards ----------
+// Scores come from the player's own game, so this is a light check: a signed-in player, a possible score, and not
+// more often than a run could end. Each player keeps one row per board, their best.
+const SCORE_GAP_MS = 15000, lastScore = new Map(); // user id + board -> when they last posted
+async function topScores(board) {
+  const rows = await sb(`/rest/v1/scores?board=eq.${board}&select=user_id,name,score,extra&order=score.desc,extra.desc,updated_at.asc&limit=${BOARD_TOP}`);
+  return rows.map(r => ({ name: r.name, score: r.score | 0, extra: r.extra | 0, id: r.user_id }));
+}
+const publicRows = (rows, uid) => rows.map(({ id, ...r }) => ({ ...r, ...(uid && id === uid ? { me: true } : {}) }));
+async function leaderboard(req, res, url) {
+  if (req.method !== 'GET') return send(res, 405, { error: 'Use GET' });
+  if (!accountsOn) return send(res, 503, NOT_CONFIGURED);
+  const board = url.searchParams.get('board') || '';
+  if (!Object.hasOwn(BOARDS, board)) return send(res, 400, { error: 'Unknown leaderboard' });
+  let user = null; // signed in: mark your own row, and send your best even if it's off the list
+  if (req.headers.authorization) { try { user = await caller(req); } catch (e) { if (!(e instanceof HttpError)) throw e; } }
+  const top = await topScores(board);
+  let mine = null;
+  if (user) {
+    const r = (await sb(`/rest/v1/scores?board=eq.${board}&user_id=eq.${user.id}&select=score,extra`))[0];
+    if (r) { const i = top.findIndex(t => t.id === user.id); mine = { score: r.score | 0, extra: r.extra | 0, rank: i >= 0 ? i + 1 : null }; }
+  }
+  return send(res, 200, { board, top: publicRows(top, user?.id), mine });
+}
+
 // ---------- routes ----------
 const routes = {
   'GET /api/me': async (req, user) => {
@@ -105,6 +131,19 @@ const routes = {
     const rows = await rpc('buy_item', { uid: user.id, item, price: check.price });
     if (!rows?.length) throw new HttpError(409, 'Not enough coins, or already owned');
     return { coins: rows[0].coins, owned: rows[0].owned };
+  },
+  'POST /api/score': async (req, user) => {
+    const { board, score, extra = 0, name } = await readJson(req);
+    const bad = scoreCheck(board, score, extra);
+    if (bad) throw new HttpError(400, bad);
+    const key = `${user.id}:${board}`, t = Date.now();
+    if (t - (lastScore.get(key) || 0) < SCORE_GAP_MS) throw new HttpError(429, 'Too many scores, try again in a moment');
+    lastScore.set(key, t);
+    if (lastScore.size > 5000) for (const [k, v] of lastScore) if (t - v > SCORE_GAP_MS) lastScore.delete(k);
+    await profile(user.id); // scores reference the profile
+    const rows = await rpc('submit_score', { uid: user.id, b: board, nm: boardName(name), s: score, x: extra });
+    const r = rows?.[0]; if (!r) throw new Error('submit_score returned nothing');
+    return { board, best: r.best | 0, bestExtra: r.best_extra | 0, rank: Number(r.rank) || null, newBest: r.best === score && r.best_extra === extra };
   },
   'POST /api/checkout': async (req, user) => {
     if (!paymentsOn) throw new HttpError(503, 'Payments are not configured on this server');
@@ -160,6 +199,7 @@ export async function handleApi(req, res) {
       return send(res, 200, { accounts: true, supabaseUrl: SB_URL, supabaseAnonKey: ANON, payments: paymentsOn, packs: paymentsOn ? COIN_PACKS : [],
         testMode: paymentsOn && env.STRIPE_SECRET_KEY.trim().startsWith('sk_test_') });
     }
+    if (path === '/api/leaderboard') return await leaderboard(req, res, new URL(req.url, 'http://x'));
     if (path === '/api/stripe/webhook') return req.method === 'POST' ? await webhook(req, res) : send(res, 405, { error: 'Use POST' });
     const route = routes[`${req.method} ${path}`];
     if (!route) return send(res, 404, { error: 'Not found' });

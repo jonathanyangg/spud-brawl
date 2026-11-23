@@ -26,7 +26,8 @@ straight in.
   map, and starts after the drop. A minimap shows the circle, the blimp's route and chests near you. Last one
   standing wins.
 - **Zombies** (co-op waves), **Gun Game**, **Moon Knives** (knives only, low gravity), **Snipers Only** (one body shot
-  kills), and a solo **Aim Trainer**.
+  kills), and a solo **Aim Trainer**. With accounts on, Aim Trainer (hits, then accuracy) and Zombies (wave, then kills)
+  have leaderboards: anyone can open them from the menu, and signed-in players' runs go up, keeping each player's best.
 
 **Maps:** each one has its own file in `public/maps/`. All have several levels, tunnels or covered passages, and jump
 pads (step on the glowing pad and it throws you up onto a ledge or roof).
@@ -66,7 +67,7 @@ cdnjs; where that host is blocked, point `THREE_JS` at a local r128 `three.min.j
 - `server.js`: serves `public/` and relays player state between everyone in a room over a WebSocket at `/ws`. No game logic lives on the server.
 - `hitcheck.js`: the relay's light check on reported hits (see Netcode below)
 - `api.js`: accounts, coins, daily spin, shop, Stripe Checkout and webhook, cloud save (`/api/...`; off until configured, see [SETUP.md](SETUP.md))
-- `supabase/schema.sql`: the database (profiles, purchases, row level security, atomic spin/buy/credit functions)
+- `supabase/schema.sql`: the database (profiles, purchases, leaderboard scores, row level security, atomic spin/buy/credit/score functions)
 - `public/game.js`: the game (rendering, physics, combat, loot, game types, menus, the main loop)
 - `public/bots.js`: bot brains, the roster, and the host's bots on everyone else's screen
 - `public/netsync.js`: online play (the presence each game streams, other players' events, who hosts the room)
@@ -86,6 +87,7 @@ cdnjs; where that host is blocked, point `THREE_JS` at a local r128 `three.min.j
 - `public/skins.js`: camo patterns drawn on a canvas, used on soldiers, guns and Armory swatches
 - `public/armory.js`: the Armory screen (and the coin shop's looks when signed in)
 - `public/economy.js`: spin table, cooldown, coin packs, buy rules (pure logic, shared by server and client, tested)
+- `public/boards.js`: the leaderboards and the scores they accept (shared by server and client)
 - `public/account.js`: sign-in panel, coin balance, spin wheel, coin packs, cloud sync
 
 ## Controls

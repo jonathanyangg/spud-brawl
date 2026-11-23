@@ -87,3 +87,36 @@ revoke execute on function public.handle_new_user() from public, anon, authentic
 grant execute on function public.claim_spin(uuid, integer, text, interval) to service_role;
 grant execute on function public.buy_item(uuid, text, integer) to service_role;
 grant execute on function public.credit_purchase(text, uuid, integer, integer, text) to service_role;
+
+-- ---------- leaderboards: Aim Trainer (hits in 60 s, then accuracy) and Zombies (wave reached, then kills) ----------
+-- One row per player per board, holding their best. Only server.js writes (submit_score); everyone reads through it.
+create table if not exists public.scores (
+  user_id    uuid not null references public.profiles (id) on delete cascade,
+  board      text not null check (board in ('aim', 'zombies')),
+  name       text not null check (char_length(name) between 1 and 16),
+  score      integer not null check (score >= 0),
+  extra      integer not null default 0 check (extra >= 0), -- the tie-breaker: accuracy % or kills
+  updated_at timestamptz not null default now(),
+  primary key (user_id, board)
+);
+create index if not exists scores_rank on public.scores (board, score desc, extra desc, updated_at);
+alter table public.scores enable row level security;
+revoke all on public.scores from anon, authenticated;
+
+-- Keep the better of the stored and the new run (the name always updates), and say where it ranks.
+create or replace function public.submit_score(uid uuid, b text, nm text, s integer, x integer)
+returns table (best integer, best_extra integer, rank bigint)
+language plpgsql set search_path = '' as $$
+declare bs integer; bx integer;
+begin
+  insert into public.scores as t (user_id, board, name, score, extra) values (uid, b, nm, s, x)
+  on conflict (user_id, board) do update
+     set name = excluded.name,
+         score = case when (excluded.score, excluded.extra) > (t.score, t.extra) then excluded.score else t.score end,
+         extra = case when (excluded.score, excluded.extra) > (t.score, t.extra) then excluded.extra else t.extra end,
+         updated_at = case when (excluded.score, excluded.extra) > (t.score, t.extra) then now() else t.updated_at end
+  returning t.score, t.extra into bs, bx;
+  return query select bs, bx, (select count(*) + 1 from public.scores o where o.board = b and (o.score, o.extra) > (bs, bx));
+end $$;
+revoke execute on function public.submit_score(uuid, text, text, integer, integer) from public, anon, authenticated;
+grant execute on function public.submit_score(uuid, text, text, integer, integer) to service_role;
