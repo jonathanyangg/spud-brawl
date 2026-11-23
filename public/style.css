@@ -102,6 +102,9 @@ input[type=range]{width:100%;max-width:280px;accent-color:var(--butter)}
 .seg{display:flex;flex-wrap:wrap;gap:4px}
 .seg button{font:inherit;font-weight:700;font-size:14px;background:rgba(255,255,255,.06);border:1px solid var(--line);color:var(--muted);padding:7px 14px;border-radius:6px;cursor:pointer}
 .seg button[aria-pressed=true]{background:var(--cream);color:var(--ink);border-color:var(--cream)}
+.seg button.event{border-color:#7cc4ef;color:#cfeaff}
+.seg button.event[aria-pressed=true]{background:#cfeaff;color:#0f2a40;border-color:#cfeaff}
+.seg .tag{margin-left:6px;padding:1px 6px;border-radius:4px;background:#2f6fb0;color:#fff;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
 .btn{font-family:var(--display);font-size:22px;background:var(--butter);color:var(--ink);border:0;border-radius:8px;padding:14px 28px;cursor:pointer;box-shadow:0 5px 0 #b9801a;transition:transform .08s,box-shadow .08s}
 .btn:active{transform:translateY(3px);box-shadow:0 2px 0 #b9801a}
 .btn.ghost{background:transparent;color:var(--cream);box-shadow:inset 0 0 0 2px var(--line);font-size:16px;padding:12px 20px}

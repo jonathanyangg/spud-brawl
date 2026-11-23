@@ -1,7 +1,7 @@
 // Spud Brawl: a free-for-all arena shooter. three.js is loaded as a global by index.html.
 import {
-  ACTIONS, AMMO, AMMO_OF, CHEST_GUNS, DEFAULT_BINDS, EYE, FRAGS, G, GAMES, GUNGAME, H, HEALS, JUMP, KNIFE, MAX_SLOTS, MOVE, PLAYER_COLOR, R,
-  RARITY, SCORE_LIMIT, SNIPER, STEP, TEAM_NAMES, THROWABLES, WEAPONS, WNAMES, keyName, validCode
+  ACTIONS, AMMO, AMMO_OF, CHEST_GUNS, DEFAULT_BINDS, EVENT, EYE, FRAGS, G, GAMES, GUNGAME, H, HEALS, JUMP, KNIFE, MAX_SLOTS, MOVE, PLAYER_COLOR, R,
+  RARITY, SCORE_LIMIT, SNIPER, STEP, TEAM_NAMES, THROWABLES, WEAPONS, WNAMES, eventOn, keyName, validCode
 } from './config.js';
 import { CHESTS, HALF, ICE, LIMIT, MAPS, PADS, PAD_R, SPAWNS, STAIRS, boxGeo, boxes, currentMap, loadMap } from './world.js';
 import { initAudio, setVolume, sfx, sfxShot, toggleMute } from './audio.js';
@@ -179,7 +179,12 @@ function launch(e, pd) {
   if (e === player) sfx.pad();
 }
 // how much grip the ground gives: 1 normally, a lot less on ice
-export const grip = e => (e.onGround && e.pos.y < 0.1 && ICE.some(([x0, x1, z0, z1]) => e.pos.x > x0 && e.pos.x < x1 && e.pos.z > z0 && e.pos.z < z1) ? 0.14 : 1);
+// how well feet hold: 1 is normal ground; frozen ponds are slick, and in Frost Fest everything underfoot is a little icy
+export const grip = e => {
+  if (!e.onGround) return 1;
+  if (e.pos.y < 0.1 && ICE.some(([x0, x1, z0, z1]) => e.pos.x > x0 && e.pos.x < x1 && e.pos.z > z0 && e.pos.z < z1)) return 0.14;
+  return game === EVENT.game ? 0.32 : 1;
+};
 
 // ---------- soldiers ----------
 // Built from boxes, facing -z, feet at y = 0. Legs pivot at the hips and knees; the upper body
@@ -455,7 +460,7 @@ export function winnerNow() {
 const idOf = e => (!e ? '' : e.isPlayer ? net.myPeer : e.remote ? e.peer : e.bid ? 'b' + e.bid : '');
 export const versus = () => game !== 'zombies' && game !== 'aim';
 export const oneLife = () => game === 'br';
-export const nadesOn = () => game === 'ffa' || game === 'zombies' || game === 'br'; // battle royale: only the frags you find
+export const nadesOn = () => game === 'ffa' || game === 'fest' || game === 'zombies' || game === 'br'; // battle royale: only the frags you find
 // gun game: after a kill, move up to the next weapon on the ladder
 export function gunGameStep(e) {
   if (game !== 'gungame' || e.remote || !e.alive) return;
@@ -1364,6 +1369,8 @@ function updateModeUI() {
   $('playBtn').hidden = browse;
   $('playBtn').textContent = online ? 'Create room' : 'Play';
   $('gameHelp').textContent = GAME_HELP[g] || '';
+  $('rowMap').hidden = g === EVENT.game; // the event has its own map
+  if (state === 'menu') { const m = g === EVENT.game ? EVENT.map : settings.map; if (m !== currentMap) { setMap(m); setupBots(5, 'normal'); } }
   if (browse) refreshRooms();
 }
 // ---------- server browser ----------
@@ -1402,6 +1409,7 @@ const GAME_HELP = {
   gungame: 'Every two kills hands you the next weapon: AR, SMG, Shotgun, Sniper, RPG, then the knife. One knife kill wins.',
   moon: 'Knives only, in low gravity. Jump high, stab fast. First to 20.',
   snipe: 'Snipers only, and one body shot drops anyone. First to 20.',
+  fest: `Limited time, through ${EVENT.last}. Free-for-all on Frostbite in a snowstorm, and the ground is slick everywhere. Finish one match to unlock the Frost Fest uniform for good. First to 20.`,
   aim: 'Solo. 60 seconds, as many targets as you can hit.',
 };
 
@@ -2247,6 +2255,26 @@ function setState(s) {
   if (s === 'menu' || s === 'over' || s === 'lobby') { $('death').hidden = true; if (document.pointerLockElement) document.exitPointerLock(); }
   if (s === 'lobby') { $('pause').hidden = true; endSpec(); closeInv(false); LB.key = ''; }
 }
+// Frost Fest: snow falling in a box that follows the camera; each flake wraps around when it leaves the box
+const SNOW_N = 1800, SNOW_R = 28, SNOW_H = 22;
+const snowPos = new Float32Array(SNOW_N * 3), snowGeo = new THREE.BufferGeometry();
+for (let i = 0; i < SNOW_N; i++) { snowPos[i * 3] = rand(-SNOW_R, SNOW_R); snowPos[i * 3 + 1] = rand(-SNOW_H / 2, SNOW_H / 2); snowPos[i * 3 + 2] = rand(-SNOW_R, SNOW_R); }
+snowGeo.setAttribute('position', new THREE.BufferAttribute(snowPos, 3));
+const snow = new THREE.Points(snowGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.11, transparent: true, opacity: 0.85, depthWrite: false }));
+snow.frustumCulled = false; snow.visible = false; scene.add(snow);
+const _snowAt = new V3();
+function updateSnow(dt) {
+  snow.visible = game === EVENT.game && currentMap === EVENT.map;
+  if (!snow.visible) return;
+  const c = camera.position, wrap = (v, r) => ((v % (2 * r)) + 3 * r) % (2 * r) - r;
+  for (let i = 0; i < SNOW_N; i++) { // world positions kept relative to the box's centre, so moving doesn't drag the snow along
+    const k = i * 3;
+    snowPos[k] = wrap(snowPos[k] + (Math.sin(now * 0.6 + i) * 0.4 + 0.5) * dt - (c.x - _snowAt.x), SNOW_R);
+    snowPos[k + 1] = wrap(snowPos[k + 1] - (1.2 + (i % 7) * 0.12) * dt - (c.y - _snowAt.y), SNOW_H / 2);
+    snowPos[k + 2] = wrap(snowPos[k + 2] + Math.cos(now * 0.5 + i) * 0.3 * dt - (c.z - _snowAt.z), SNOW_R);
+  }
+  _snowAt.copy(c); snow.position.copy(c); snowGeo.attributes.position.needsUpdate = true;
+}
 export function setMap(name) {
   if (name === currentMap) return;
   loadMap(scene, name);
@@ -2261,7 +2289,7 @@ function startGame(fromLink = false) {
   saveSettings();
   leaveRoom();
   mode = settings.mode;
-  game = GAMES[settings.game] ? settings.game : 'ffa';
+  game = GAMES[settings.game] && (settings.game !== EVENT.game || eventOn()) ? settings.game : 'ffa';
   if (mode === 'online' && game === 'aim') game = 'ffa'; // the room's game replaces this once connected
   resetZombies(); stopAim(); fx.flash = 0;
   player.name = settings.name;
@@ -2271,7 +2299,7 @@ function startGame(fromLink = false) {
   for (const n of nades) scene.remove(n.m); nades.length = 0;
   for (const pl of piles) scene.remove(pl.g); piles.length = 0;
   $('feed').innerHTML = '';
-  setMap(settings.map); // online, the room's map replaces this once connected
+  setMap(game === EVENT.game ? EVENT.map : settings.map); // online, the room's map replaces this once connected
   teams.bank = [0, 0]; net.tscore = null; resetBR();
   player.team = game === 'tdm' || (game === 'br' && mode !== 'online' && (settings.sq | 0) > 1) ? 0 : undefined; // online, the server seats you once connected
   endSpec();
@@ -2498,7 +2526,7 @@ export function endGame(winner) {
   endSpec();
   buildTable($('overTbl'));
   if (won) sfx.kill();
-  gainXP(P.XP.match + (won ? P.XP.win : 0), { match: true, win: won });
+  gainXP(P.XP.match + (won ? P.XP.win : 0), { match: true, win: won, event: game === EVENT.game ? EVENT.look : null });
   showOverXp();
 }
 function showOverXp() {
@@ -2543,7 +2571,8 @@ segment('sqSeg', 'sq', v => +v, updateModeUI);
 segment('hokSeg', 'hok', v => +v);
 segment('pubSeg', 'pub', v => v === 'true');
 segment('diffSeg', 'diff', v => v);
-if (!GAMES[settings.game]) settings.game = 'ffa';
+if (!GAMES[settings.game] || (settings.game === EVENT.game && !eventOn())) settings.game = 'ffa';
+if (!eventOn()) $('gameSeg').querySelector(`[data-v=${EVENT.game}]`).remove(); // the event is over (or not on yet)
 segment('gameSeg', 'game', v => v, updateModeUI);
 segment('botSeg', 'bots', v => +v);
 updateModeUI();
@@ -2690,6 +2719,7 @@ function tick(t) {
     if (flashMesh.visible) { flashMesh.position.copy(curVM().userData.muzzle); flashMesh.rotation.set(rand(0, 3), rand(0, 3), rand(0, 3)); flashMesh.scale.setScalar(curW().id === 0 || curW().id === 3 ? 1 : 1.8); }
   }
   if (state !== 'menu' && state !== 'lobby') updateHUD(dt);
+  updateSnow(dt);
   updatePings();
   if (state === 'lobby') updateLobby(dt);
   updateInv();

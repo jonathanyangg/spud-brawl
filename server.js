@@ -17,7 +17,8 @@ const MAX_PLAYERS = 12;
 const MAX_ROOMS = +process.env.MAX_ROOMS || 300, PER_IP = +process.env.MAX_PER_IP || 16;
 const MSG_RATE = 60, MSG_BURST = 120, BYTE_RATE = 512 * 1024, STRIKES = 200;
 const MAPS = ['depot', 'yard', 'dunes', 'frost', 'stack', 'highrise', 'island'];
-const GAMES = ['ffa', 'tdm', 'br', 'zombies', 'gungame', 'moon', 'snipe']; // aim trainer is solo, never a room
+const GAMES = ['ffa', 'tdm', 'br', 'zombies', 'gungame', 'moon', 'snipe', 'fest']; // aim trainer is solo, never a room
+const FIXED_MAP = { fest: 'frost' }; // the event plays on its own map
 const DIFFS = ['easy', 'normal', 'hard'];
 const int = (v, lo, hi, d) => { const n = parseInt(v, 10); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
@@ -73,6 +74,7 @@ wss.on('connection', (ws, req) => {
     locked: false, inMatch: new Set(), seats: new Map(), // locked: a battle royale is on; inMatch: who was here when it started; seats: their squads
     keys: new Map(), // player id -> their secret key, for everyone seated (and, while locked, everyone in the match)
   });
+  if (FIXED_MAP[room.game]) room.map = FIXED_MAP[room.game];
   const peers = room.peers, known = room.keys.get(id);
   if (known !== undefined && known !== key) { ws.send('{"t":"taken"}'); ws.close(); return; } // their id, not their key
   const old = peers.get(id);
@@ -145,6 +147,7 @@ function setRoom(room, o) {
   const c = room.cfg, has = k => o[k] !== undefined && o[k] !== null;
   if (MAPS.includes(o.map)) room.map = o.map;
   if (GAMES.includes(o.game)) room.game = o.game;
+  if (FIXED_MAP[room.game]) room.map = FIXED_MAP[room.game];
   if (has('bots')) c.bots = int(o.bots, 0, 11, c.bots);
   if (DIFFS.includes(o.diff)) c.diff = o.diff;
   if (has('ts')) c.ts = int(o.ts, 1, 6, c.ts);

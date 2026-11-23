@@ -36,7 +36,15 @@ export const LOOKS = {
   glacier:  { name: 'Glacier',    pattern: 'metal',   colors: ['#d8f3ff', '#5fb4e0'] },
   spud:     { name: 'Golden Spud', pattern: 'metal',  colors: ['#e8b85c', '#8a5a1e'] },
   lucky:    { name: 'Lucky',      pattern: 'blotch',  colors: ['#2f8f3a', '#1d5e26', '#f6d26b', '#7fd36b'] },
+  // event looks: earned by playing the event (see EVENT_LOOKS)
+  frostfest: { name: 'Frost Fest', pattern: 'digital', colors: ['#dff3ff', '#7cc4ef', '#2f6fb0', '#ffffff'] },
 };
+// Event uniforms: [look, how to get it]. Finishing a match of the event adds the look to the save's ev list, and it
+// stays unlocked after the event ends. Like level unlocks, the game grants it, so it's cosmetic trust among friends.
+export const EVENT_LOOKS = [['frostfest', 'Finish a Frost Fest match']];
+const cleanEv = v => (Array.isArray(v) ? [...new Set(v)].filter(id => EVENT_LOOKS.some(([e]) => e === id)) : []);
+// two saves' event looks together, so a cloud sync never takes one away
+export const unionEv = (a, b) => cleanEv([...(a?.ev || []), ...(b?.ev || [])]);
 // Premium looks never unlock by level or kills: they are bought with coins (server-side) or won on the free daily spin.
 // price 0 = spin only, never for sale. Owned ids come from the server's profile.
 export const PREMIUM = {
@@ -63,7 +71,7 @@ export const ATTACH = {
 
 const fill = v => Array.from({ length: N }, () => (typeof v === 'function' ? v() : v));
 export const newProgress = () => ({ xp: 0, wk: fill(0), wh: fill(0), uniform: 'olive', camo: fill('factory'), att: fill(() => []),
-  loadout: [0, 1, 2], nade: 'frag', matches: 0, wins: 0, fresh: 0, bestAim: 0, owned: [] });
+  loadout: [0, 1, 2], nade: 'frag', matches: 0, wins: 0, fresh: 0, bestAim: 0, owned: [], ev: [] });
 const cleanOwned = v => (Array.isArray(v) ? [...new Set(v)].filter(id => Object.hasOwn(PREMIUM, id)) : []);
 // localStorage is user-editable: keep only well-formed values.
 // owned: the server's list of premium items; when given it replaces whatever the save claims.
@@ -74,6 +82,7 @@ export function loadProgress(raw, owned) {
   if (!o || typeof o !== 'object') return p;
   if (owned === undefined) p.owned = cleanOwned(o.owned); // a local cache of what the server said; cosmetic only
   const n = v => (Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
+  p.ev = cleanEv(o.ev);
   p.xp = n(o.xp); p.matches = n(o.matches); p.wins = n(o.wins); p.fresh = n(o.fresh); p.bestAim = n(o.bestAim);
   for (let i = 0; i < N; i++) { p.wk[i] = n(o.wk?.[i]); p.wh[i] = n(o.wh?.[i]); }
   for (let i = 0; i < N; i++) { // after all kill counts: nebula depends on other weapons
@@ -91,7 +100,7 @@ export function loadProgress(raw, owned) {
 
 export const level = p => levelInfo(p.xp).level;
 const owns = (p, id, kind) => Object.hasOwn(PREMIUM, id) && PREMIUM[id].kind === kind && (p.owned || []).includes(id);
-export const uniformUnlocked = (p, id) => UNIFORMS.some(([u, l]) => u === id && level(p) >= l) || owns(p, id, 'uniform');
+export const uniformUnlocked = (p, id) => UNIFORMS.some(([u, l]) => u === id && level(p) >= l) || owns(p, id, 'uniform') || ((p.ev || []).includes(id) && EVENT_LOOKS.some(([e]) => e === id));
 export const attachUnlocked = (p, id) => Object.hasOwn(ATTACH, id) && level(p) >= ATTACH[id].level;
 export const weaponUnlocked = (p, i) => Number.isInteger(i) && i >= 0 && i < N && level(p) >= WEAPONS[i].level;
 export const throwableUnlocked = (p, id) => Object.hasOwn(THROWABLES, id) && level(p) >= THROWABLES[id].level;
@@ -148,7 +157,7 @@ export function capGain(mine, cloud, at, now, owned) {
 
 function unlockLabels(p) {
   const out = new Map();
-  for (const [u] of UNIFORMS) if (uniformUnlocked(p, u)) out.set('u' + u, `${LOOKS[u].name} uniform`);
+  for (const [u] of [...UNIFORMS, ...EVENT_LOOKS]) if (uniformUnlocked(p, u)) out.set('u' + u, `${LOOKS[u].name} uniform`);
   for (let i = 0; i < N; i++) for (const [c] of CAMOS) if (camoUnlocked(p, i, c)) out.set(`c${i}${c}`, `${LOOKS[c].name} camo · ${WEAPONS[i].name}`);
   for (const a in ATTACH) if (attachUnlocked(p, a)) out.set('a' + a, ATTACH[a].name);
   for (let i = 0; i < N; i++) if (weaponUnlocked(p, i)) out.set('w' + i, WEAPONS[i].name);
@@ -156,13 +165,14 @@ function unlockLabels(p) {
   return out;
 }
 // Add XP (and a kill or match result); returns the new level, if any, and what just unlocked.
-// kill: { w: weapon index (anything past the weapons, like a frag, counts toward no camo), head }
-export function award(p, xp, { kill, match, win } = {}) {
+// kill: { w: weapon index (anything past the weapons, like a frag, counts toward no camo), head }; event: an event look earned
+export function award(p, xp, { kill, match, win, event } = {}) {
   const before = unlockLabels(p), lvl = level(p);
   p.xp += Math.max(0, Math.round(xp));
   if (kill && kill.w >= 0 && kill.w < N) { p.wk[kill.w]++; if (kill.head) p.wh[kill.w]++; }
   if (match) p.matches++;
   if (win) p.wins++;
+  if (event) p.ev = cleanEv([...(p.ev || []), event]);
   const unlocks = [...unlockLabels(p)].filter(([k]) => !before.has(k)).map(([, v]) => v);
   p.fresh += unlocks.length;
   return { levelUp: level(p) > lvl ? level(p) : null, unlocks };

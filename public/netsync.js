@@ -34,7 +34,7 @@ export const r2 = v => Math.round(v * 100) / 100;
 export const num = v => (Number.isFinite(+v) ? +v : 0);
 export const cleanName = v => String(v || '').replace(/[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁠-⁯]/g, '').trim().slice(0, 16);
 // shop looks are valid too, so friends see what you bought (bots never wear them: randomLook uses the free lists)
-const cleanUniform = v => (UNIFORM_IDS.includes(v) || P.premiumOf('uniform').includes(v) ? v : 'olive');
+const cleanUniform = v => (UNIFORM_IDS.includes(v) || P.premiumOf('uniform').includes(v) || P.EVENT_LOOKS.some(([e]) => e === v) ? v : 'olive');
 const cleanCamo = v => (CAMO_IDS.includes(v) || P.premiumOf('camo').includes(v) ? v : 'factory');
 const cleanLevel = v => clamp(Math.floor(num(v)), 1, P.MAX_LEVEL);
 export const cleanRoom = v => String(v || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 20) || 'brawl';

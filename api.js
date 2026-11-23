@@ -3,7 +3,7 @@
 // decided here, and every write uses the service-role key through atomic Postgres functions (supabase/schema.sql).
 // With no env vars set, /api/config says so and every other route answers 503; the game runs as before.
 import { randomInt } from 'node:crypto';
-import { loadProgress, mergeProgress, capGain } from './public/progress.js';
+import { loadProgress, mergeProgress, capGain, unionEv } from './public/progress.js';
 import { pickSpin, spinState, SPIN_COOLDOWN_MS, COIN_PACKS, packById, buyCheck } from './public/economy.js';
 import { BOARDS, BOARD_TOP, scoreCheck, boardName } from './public/boards.js';
 
@@ -111,8 +111,13 @@ const routes = {
   'POST /api/progress': async (req, user) => {
     const body = await readJson(req), p = await profile(user.id);
     const mine = cleanSave(body.progress, p.owned), cloud = p.progress ? cleanSave(p.progress, p.owned) : null;
-    if (cloud && mergeProgress(mine, cloud) === cloud) return { progress: cloud, kept: 'cloud' };
-    const { save, capped, at } = capGain(mine, cloud, p.progress?.at, Date.now(), p.owned);
+    const ev = unionEv(mine, cloud); // event looks from either side are kept whichever save wins
+    if (cloud && mergeProgress(mine, cloud) === cloud) {
+      if (ev.length > cloud.ev.length) { cloud.ev = ev; await sb(`/rest/v1/profiles?id=eq.${user.id}`, { method: 'PATCH', body: { progress: forStorage(cloud, p.progress?.at) }, prefer: 'return=minimal' }); }
+      return { progress: cloud, kept: 'cloud' };
+    }
+    const r = capGain(mine, cloud, p.progress?.at, Date.now(), p.owned), at = r.at, capped = r.capped;
+    const save = ev.length > r.save.ev.length ? { ...r.save, ev } : r.save;
     await sb(`/rest/v1/profiles?id=eq.${user.id}`, { method: 'PATCH', body: { progress: forStorage(save, Math.round(at)) }, prefer: 'return=minimal' });
     return { progress: save, kept: capped ? 'capped' : 'yours' };
   },

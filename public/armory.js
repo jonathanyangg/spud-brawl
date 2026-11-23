@@ -1,8 +1,8 @@
 // The Armory: your loadout (3 weapons + 1 throwable), a uniform, a camo per weapon, and up to two attachments per gun.
 // Edits the progress object in place and calls back so the game can save and re-dress the player.
 // Signed in, it also lists coin-shop looks: owned ones equip like any other, the rest show a price and a Buy button.
-import { WEAPONS, THROWABLES } from './config.js';
-import { LOOKS, UNIFORMS, CAMOS, ATTACH, MAX_ATTACH, PREMIUM, premiumOf, level, uniformUnlocked, camoUnlocked, attachUnlocked, camoNeed, weaponUnlocked, throwableUnlocked } from './progress.js';
+import { EVENT, WEAPONS, THROWABLES, eventOn } from './config.js';
+import { EVENT_LOOKS, LOOKS, UNIFORMS, CAMOS, ATTACH, MAX_ATTACH, PREMIUM, premiumOf, level, uniformUnlocked, camoUnlocked, attachUnlocked, camoNeed, weaponUnlocked, throwableUnlocked } from './progress.js';
 import { lookSwatch } from './skins.js';
 import { shop } from './account.js';
 
@@ -66,6 +66,14 @@ function render() {
     const grid = el('div', 'swatches');
     for (const [id, need] of UNIFORMS) grid.append(swatchBtn(id, prog.uniform === id, uniformUnlocked(prog, id) ? '' : `Level ${need}`, () => { prog.uniform = id; }));
     body.append(grid);
+    // event uniforms: shown once earned, or while their event is on
+    const evs = EVENT_LOOKS.filter(([id]) => uniformUnlocked(prog, id) || (id === EVENT.look && eventOn()));
+    if (evs.length) {
+      body.append(el('h3', null, 'Event uniforms'));
+      const eg = el('div', 'swatches');
+      for (const [id, how] of evs) eg.append(swatchBtn(id, prog.uniform === id, uniformUnlocked(prog, id) ? '' : how, () => { prog.uniform = id; }));
+      body.append(eg);
+    }
     shopSection(body, 'uniform', id => prog.uniform === id, id => { prog.uniform = id; });
     body.append(el('p', 'help', `${prog.matches} matches played · ${prog.wins} won`));
     return;

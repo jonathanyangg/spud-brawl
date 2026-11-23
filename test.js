@@ -233,6 +233,9 @@ const tick = () => new Promise(r => setTimeout(r, 100));
   await tick(); assert.equal(other.map, 'depot', 'unknown map falls back to the default'); assert.equal(other.game, 'ffa', 'unknown game too');
   b.send(JSON.stringify({ v: 1, n: 'B2' })); await tick();
   assert.equal(other.msgs.length, 0, 'rooms are isolated');
+  const fest = await open('festroom', 'ffff1', 'depot', 'fest');
+  await tick(); assert.equal(fest.game, 'fest'); assert.equal(fest.map, 'frost', 'the event room plays on its own map');
+  fest.close();
   const b2 = await open('test', 'bbbb2'); // reconnect with the same id
   await tick();
   assert.ok(!a.msgs.some(m => m.t === 'bye'), 'reconnect does not announce a leave');
@@ -499,6 +502,11 @@ const AP = 3995; await startServer(AP, MOCK_ENV);
   assert.ok(Number.isFinite(db.get(UA).progress.at), 'the bucket time is stored with the save');
   r = await call(AP, 'POST', '/api/progress', { token: 'tok-a', body: { progress: { xp: 10_000_000 } } });
   assert.equal(r.json.kept, 'capped', 'a huge jump is trimmed'); assert.ok(db.get(UA).progress.xp < 1000 + P.SYNC_XP.max);
+  // an event look earned on a save with less XP still reaches the cloud, and is never taken away
+  r = await call(AP, 'POST', '/api/progress', { token: 'tok-a', body: { progress: { xp: 10, ev: ['frostfest', 'junk'] } } });
+  assert.equal(r.json.kept, 'cloud'); assert.deepEqual(r.json.progress.ev, ['frostfest']); assert.deepEqual(db.get(UA).progress.ev, ['frostfest']);
+  r = await call(AP, 'POST', '/api/progress', { token: 'tok-a', body: { progress: { xp: db.get(UA).progress.xp + 100 } } });
+  assert.notEqual(r.json.kept, 'cloud'); assert.deepEqual(r.json.progress.ev, ['frostfest'], 'a winning save without it keeps it'); assert.deepEqual(db.get(UA).progress.ev, ['frostfest']);
   assert.ok(!('at' in r.json.progress) && !('at' in (await call(AP, 'GET', '/api/me', { token: 'tok-a' })).json.progress), 'at is never sent back');
 
   // daily spin: server picks, once per 24h, and two clicks at once only pay once
