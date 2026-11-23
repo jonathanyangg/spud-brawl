@@ -126,7 +126,7 @@ wss.on('connection', (ws, req) => {
       return;
     }
     // throw out hit reports no real game could make (see hitcheck.js); the rest of the presence goes through as sent
-    const out = filterPresence(o, raw, ws, k => (k === id ? null : peers.get(k)?.pres), peers.values().next().value, now);
+    const out = filterPresence(o, raw, ws, k => (k === id ? null : peers.get(k)?.pres), peers.values().next().value, now, room.game);
     ws.last = out;
     const msg = relay(id, out, ws.team);
     for (const [k, peer] of peers) if (k !== id && peer.readyState === 1) peer.send(msg);

@@ -212,10 +212,15 @@ function closeCoins() { $('coinOv').hidden = true; $('coinBtn').focus(); }
 // ---------- leaderboards ----------
 // anyone can look; signed in, your runs go up (your best stays) and your row is marked
 export const boards = { get on() { return !!cfg?.accounts; }, get signedIn() { return !!me; } };
-// after an Aim Trainer or Zombies run: { best, bestExtra, rank, newBest }, or null when signed out or it failed
-export async function postScore(board, score, extra, name) {
+// when a run starts: the server's token for it, or null (signed out, accounts off, or it failed: the run plays, it just won't post)
+export async function startRun(board) {
   if (!me) return null;
-  try { return await api('/api/score', { board, score, extra, name }); } catch (e) { return null; }
+  try { return (await api('/api/run', { board })).run || null; } catch (e) { return null; }
+}
+// after an Aim Trainer or Zombies run, with its token: { best, bestExtra, rank, newBest }, or null when signed out or it failed
+export async function postScore(board, score, extra, name, run) {
+  if (!me || !run) return null;
+  try { return await api('/api/score', { board, score, extra, name, run }); } catch (e) { return null; }
 }
 let lbBoard = 'aim', lbReq = 0;
 async function showBoard(board) {

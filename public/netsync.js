@@ -166,6 +166,7 @@ function handleNetEvent(r, e) {
     // a hit on me, or (if I run the zombies) on one of my zombies
     const wn = wname(e[5]), amt = clamp(num(e[3]), 0, 250);
     if (e[2] === net.myPeer && state === 'playing') {
+      if (wn === 'Zombie' && (game !== 'zombies' || r.peer !== hostPeer())) return; // only the zombies' runner bites, and only in Zombies
       const src = wn === 'Zombie' ? nearestZombie(player.pos) || r : (typeof e[6] === 'string' && net.bots.get(e[6])) || r; // a bot's shot, or theirs
       damage(player, amt, src, wn, e[4] === 1, null);
     } else if (typeof e[2] === 'string' && e[2][0] === 'z' && game === 'zombies' && zHost()) {

@@ -2,7 +2,7 @@
 // Nothing here trusts the client: the caller's Supabase token is checked on every call, rewards and prices are
 // decided here, and every write uses the service-role key through atomic Postgres functions (supabase/schema.sql).
 // With no env vars set, /api/config says so and every other route answers 503; the game runs as before.
-import { randomInt } from 'node:crypto';
+import { randomBytes, randomInt } from 'node:crypto';
 import { loadProgress, mergeProgress, capGain, unionEv } from './public/progress.js';
 import { pickSpin, spinState, SPIN_COOLDOWN_MS, COIN_PACKS, packById, buyCheck } from './public/economy.js';
 import { BOARDS, BOARD_TOP, scoreCheck, boardName } from './public/boards.js';
@@ -76,9 +76,13 @@ const cleanSave = (progress, owned) => loadProgress(JSON.stringify(progress ?? n
 const forStorage = ({ owned, ...save }, at) => ({ ...save, at });
 
 // ---------- leaderboards ----------
-// Scores come from the player's own game, so this is a light check: a signed-in player, a possible score, and not
-// more often than a run could end. Each player keeps one row per board, their best.
+// Scores come from the player's own game, so this is a light check: a signed-in player, a possible score, a run token
+// handed out when the run started (used once, and old enough for that score), and not more often than a run could end.
+// Each player keeps one row per board, their best.
 const SCORE_GAP_MS = 15000, lastScore = new Map(); // user id + board -> when they last posted
+// user id + board -> { token, at }: one live run each, so a new run replaces the last and the map stays small.
+// RUN_TIME_SCALE only lets the tests shorten the minimum run times.
+const runs = new Map(), RUN_SCALE = Number(env.RUN_TIME_SCALE) > 0 ? Number(env.RUN_TIME_SCALE) : 1;
 async function topScores(board) {
   const rows = await sb(`/rest/v1/scores?board=eq.${board}&select=user_id,name,score,extra&order=score.desc,extra.desc,updated_at.asc&limit=${BOARD_TOP}`);
   return rows.map(r => ({ name: r.name, score: r.score | 0, extra: r.extra | 0, id: r.user_id }));
@@ -137,11 +141,24 @@ const routes = {
     if (!rows?.length) throw new HttpError(409, 'Not enough coins, or already owned');
     return { coins: rows[0].coins, owned: rows[0].owned };
   },
+  // a run starts: its token, which the score must bring back
+  'POST /api/run': async (req, user) => {
+    const { board } = await readJson(req);
+    if (!Object.hasOwn(BOARDS, board)) throw new HttpError(400, 'Unknown leaderboard');
+    const t = Date.now(), token = randomBytes(18).toString('base64url');
+    runs.set(`${user.id}:${board}`, { token, at: t });
+    if (runs.size > 5000) for (const [k, v] of runs) if (t - v.at > BOARDS[k.slice(k.indexOf(':') + 1)].ttl) runs.delete(k);
+    return { run: token };
+  },
   'POST /api/score': async (req, user) => {
-    const { board, score, extra = 0, name } = await readJson(req);
+    const { board, score, extra = 0, name, run } = await readJson(req);
     const bad = scoreCheck(board, score, extra);
     if (bad) throw new HttpError(400, bad);
-    const key = `${user.id}:${board}`, t = Date.now();
+    const key = `${user.id}:${board}`, t = Date.now(), live = runs.get(key);
+    // the token for this player and board, once: a wrong or reused one (or none) doesn't count
+    if (!live || typeof run !== 'string' || run !== live.token || t - live.at > BOARDS[board].ttl) throw new HttpError(400, 'No run to post this score for');
+    runs.delete(key);
+    if (t - live.at < BOARDS[board].minMs(score) * RUN_SCALE) throw new HttpError(400, 'That run was too quick for this score');
     if (t - (lastScore.get(key) || 0) < SCORE_GAP_MS) throw new HttpError(429, 'Too many scores, try again in a moment');
     lastScore.set(key, t);
     if (lastScore.size > 5000) for (const [k, v] of lastScore) if (t - v > SCORE_GAP_MS) lastScore.delete(k);

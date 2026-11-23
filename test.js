@@ -9,7 +9,7 @@ import Stripe from 'stripe';
 import * as P from './public/progress.js';
 import * as E from './public/economy.js';
 import { buildNav, navToward } from './public/nav.js';
-import { WEAPONS } from './public/config.js';
+import { WEAPONS, WNAMES } from './public/config.js';
 
 // ---------- progression ----------
 {
@@ -332,7 +332,28 @@ const tick = () => new Promise(r => setTimeout(r, 100));
   host.send(pres([0, 0, 0], [], { dd: 1, bt: bots })); await tick();
   host.send(pres([0, 0, 0], [[1, 'h', 'targ3', 10, 0, AR, 'b7'], [2, 'h', 'targ3', 10, 0, AR, 'b8'], [3, 'h', 'b7', 10, 0, AR, '']], { dd: 1, bt: bots })); await tick();
   assert.deepEqual(hitsFrom(tgt, 'hhost1'), [1], "the host's live bot still shoots while the host is down; a downed bot and the dead host don't");
+  // no shooter position: no range check, so no hit
+  const ZW = WNAMES.indexOf('Zombie');
+  shot.send(JSON.stringify({ v: 1, dd: 0, lb: 0, ev: [[50, 'h', 'targ3', 10, 0, AR, '']] })); await tick();
+  assert.deepEqual(hitsFrom(tgt, 'shoot2'), [], 'a hit with no position is dropped');
+  shot.send(pres([0, 'x', 0], [[51, 'h', 'targ3', 10, 0, AR, '']])); await tick();
+  assert.deepEqual(hitsFrom(tgt, 'shoot2'), [], 'and with a broken one');
+  shot.send(pres([0, 0, 0], [[52, 'h', 'targ3', 10, 0, AR, '']])); await tick();
+  assert.deepEqual(hitsFrom(tgt, 'shoot2'), [52], 'the same hit with a position goes through');
+  // zombie bites outside Zombies
+  shot.send(pres([0, 0, 0], [[53, 'h', 'targ3', 100, 0, ZW, '']])); await tick();
+  assert.deepEqual(hitsFrom(tgt, 'shoot2'), [], 'a "Zombie" hit in free-for-all is dropped');
   for (const s of [host, shot, tgt]) s.close();
+  const zh = await open('zroom', 'zhost1', 'yard', 'zombies'), zv = await open('zroom', 'zvic2'); await tick();
+  zv.send(pres([2, 0, 0], [])); await tick();
+  zh.send(pres([0, 0, 0], [[1, 'h', 'zvic2', 25, 0, ZW, '']])); await tick();
+  assert.deepEqual(hitsFrom(zv, 'zhost1'), [1], 'a zombie bite in Zombies goes through');
+  zh.send(pres([0, 0, 0], [[1, 'h', 'zvic2', 25, 0, ZW, ''], ...Array.from({ length: 60 }, (_, i) => [2 + i, 'h', 'zvic2', 35, 0, ZW, ''])])); await tick();
+  const bites = hitsFrom(zv, 'zhost1');
+  assert.ok(bites.length > 20 && bites.length < 61, `a flood of bites on one player is cut off (${bites.length} of 61 kept)`);
+  zh.send(pres([0, 0, 0], [[70, 'h', 'zvic2', 101, 0, ZW, '']])); await tick();
+  assert.deepEqual(hitsFrom(zv, 'zhost1'), [], 'and one bite is never more than 100');
+  for (const s of [zh, zv]) s.close();
   console.log('hit checks ok');
 }
 
@@ -476,7 +497,7 @@ const mock = createServer(async (req, res) => {
 await new Promise(r => mock.listen(3996, r));
 const MOCK_ENV = { SUPABASE_URL: 'http://localhost:3996/', SUPABASE_ANON_KEY: 'anon-key', SUPABASE_SERVICE_ROLE_KEY: 'service-key',
   STRIPE_SECRET_KEY: 'sk_test_dummy', STRIPE_WEBHOOK_SECRET: WHSEC };
-const AP = 3995; await startServer(AP, MOCK_ENV);
+const AP = 3995; await startServer(AP, { ...MOCK_ENV, RUN_TIME_SCALE: '0.01' }); // minimum run times x 0.01: Aim Trainer 0.55 s
 {
   const cfg = await call(AP, 'GET', '/api/config');
   assert.deepEqual({ ...cfg.json, packs: cfg.json.packs.length }, { accounts: true, supabaseUrl: 'http://localhost:3996', supabaseAnonKey: 'anon-key', payments: true, packs: 3, testMode: true });
@@ -555,15 +576,38 @@ const AP = 3995; await startServer(AP, MOCK_ENV);
   r = await call(AP, 'POST', '/api/stripe/webhook', signed(paidEvent('cs_test_3', { uid: UA, coins: '99999' })));
   assert.equal(r.json.ignored, true, 'coins must match a pack'); assert.equal(db.get(UA).coins, 500);
   assert.equal((await call(AP, 'POST', '/api/stripe/webhook', signed(paidEvent('cs_test_4', { uid: UA, coins: '500' }), 'whsec_nope'))).status, 400);
-  // leaderboards: anyone reads; only signed-in players post, possible scores only, best kept, not too often
+  // leaderboards: anyone reads; only signed-in players post, possible scores only, from a run token, best kept, not too often
+  const runOf = async (tok, board) => (await call(AP, 'POST', '/api/run', { token: tok, body: { board } })).json.run;
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  assert.equal((await call(AP, 'POST', '/api/run', { body: { board: 'aim' } })).status, 401, 'a run token needs a sign-in');
+  assert.equal((await call(AP, 'POST', '/api/run', { token: 'tok-a', body: { board: 'chess' } })).status, 400, 'and a real board');
   assert.equal((await call(AP, 'POST', '/api/score', { body: { board: 'aim', score: 10 } })).status, 401, 'posting needs a sign-in');
   assert.equal((await call(AP, 'POST', '/api/score', { token: 'tok-a', body: { board: 'chess', score: 10 } })).status, 400, 'unknown board');
   assert.equal((await call(AP, 'POST', '/api/score', { token: 'tok-a', body: { board: 'aim', score: 9999, extra: 50 } })).status, 400, 'impossible score');
   assert.equal((await call(AP, 'POST', '/api/score', { token: 'tok-a', body: { board: 'aim', score: 12.5, extra: 50 } })).status, 400, 'whole numbers');
-  r = await call(AP, 'POST', '/api/score', { token: 'tok-a', body: { board: 'aim', score: 40, extra: 70, name: 'Ann​' } });
+  let run = await runOf('tok-a', 'aim'); await wait(650);
+  assert.equal((await call(AP, 'POST', '/api/score', { token: 'tok-a', body: { board: 'aim', score: 241, extra: 90, run } })).status, 400, 'over the Aim Trainer maximum');
+  run = await runOf('tok-a', 'zombies'); await wait(650);
+  assert.equal((await call(AP, 'POST', '/api/score', { token: 'tok-a', body: { board: 'zombies', score: 2, extra: 500, run } })).status, 400, 'more kills than that wave had zombies');
+  assert.equal((await call(AP, 'POST', '/api/score', { token: 'tok-a', body: { board: 'aim', score: 40, extra: 70 } })).status, 400, 'no run token');
+  run = await runOf('tok-a', 'zombies'); await wait(650);
+  assert.equal((await call(AP, 'POST', '/api/score', { token: 'tok-a', body: { board: 'aim', score: 40, extra: 70, run } })).status, 400, "another board's token");
+  assert.equal((await call(AP, 'POST', '/api/score', { token: 'tok-b', body: { board: 'zombies', score: 3, extra: 20, run } })).status, 400, "another player's token");
+  run = await runOf('tok-a', 'aim');
+  assert.equal((await call(AP, 'POST', '/api/score', { token: 'tok-a', body: { board: 'aim', score: 40, extra: 70, run } })).status, 400, 'too soon after the run started');
+  run = await runOf('tok-a', 'zombies'); await wait(150);
+  assert.equal((await call(AP, 'POST', '/api/score', { token: 'tok-a', body: { board: 'zombies', score: 40, extra: 300, run } })).status, 400, 'wave 40 that fast');
+  run = await runOf('tok-a', 'zombies'); await wait(300);
+  r = await call(AP, 'POST', '/api/score', { token: 'tok-a', body: { board: 'zombies', score: 3, extra: 20, run } });
+  assert.equal(r.status, 200, 'a zombies run that took long enough for wave 3'); assert.equal(r.json.best, 3);
+  run = await runOf('tok-a', 'aim'); await wait(650);
+  r = await call(AP, 'POST', '/api/score', { token: 'tok-a', body: { board: 'aim', score: 40, extra: 70, name: 'Ann​', run } });
   assert.deepEqual(r.json, { board: 'aim', best: 40, bestExtra: 70, rank: 1, newBest: true });
-  assert.equal((await call(AP, 'POST', '/api/score', { token: 'tok-a', body: { board: 'aim', score: 50, extra: 70 } })).status, 429, 'one run per 15 s');
-  r = await call(AP, 'POST', '/api/score', { token: 'tok-b', body: { board: 'aim', score: 55, extra: 60, name: 'Bo' } });
+  assert.equal((await call(AP, 'POST', '/api/score', { token: 'tok-a', body: { board: 'aim', score: 40, extra: 70, run } })).status, 400, 'a token posts once');
+  run = await runOf('tok-a', 'aim'); await wait(650);
+  assert.equal((await call(AP, 'POST', '/api/score', { token: 'tok-a', body: { board: 'aim', score: 50, extra: 70, run } })).status, 429, 'one run per 15 s');
+  run = await runOf('tok-b', 'aim'); await wait(650);
+  r = await call(AP, 'POST', '/api/score', { token: 'tok-b', body: { board: 'aim', score: 55, extra: 60, name: 'Bo', run } });
   assert.equal(r.json.rank, 1); assert.equal(scores.get(`${UA}:aim`).name, 'Ann', 'names cleaned');
   r = await call(AP, 'GET', '/api/leaderboard?board=aim');
   assert.deepEqual(r.json, { board: 'aim', top: [{ name: 'Bo', score: 55, extra: 60 }, { name: 'Ann', score: 40, extra: 70 }], mine: null }, 'public, no ids');

@@ -9,7 +9,7 @@ import { setMusic, setMusicOn } from './music.js';
 import * as P from './progress.js';
 import { applyLook } from './skins.js';
 import { initArmory, openArmory } from './armory.js';
-import { boards, initAccount, postScore, progressSaved } from './account.js';
+import { boards, initAccount, postScore, progressSaved, startRun } from './account.js';
 import { $, V3, clamp, rand } from './util.js';
 import { navPoint, setupBots, stairWaypoint, updateBot, updateRoster } from './bots.js';
 import {
@@ -2196,6 +2196,9 @@ function endZombies() {
   showOverXp();
   boardRow('zombies', Z.wave, player.kills | 0);
 }
+// the leaderboard run token for this Aim Trainer or Zombies run (a promise; null inside when there's none)
+let runToken = Promise.resolve(null);
+const newRun = () => { runToken = boards.on && (game === 'aim' || game === 'zombies') ? startRun(game) : Promise.resolve(null); };
 // the over card's leaderboard line: where this run put you, or how to get on the board
 function boardRow(board, score, extra) {
   if (!boards.on) return;
@@ -2203,7 +2206,8 @@ function boardRow(board, score, extra) {
   a.textContent = 'Leaderboard'; tr.append(a, b); tbl.append(tr);
   if (!boards.signedIn) { b.textContent = 'Sign in to post your runs'; return; }
   b.textContent = 'Posting…';
-  postScore(board, score, extra, player.name).then(r => {
+  const run = runToken; runToken = Promise.resolve(null); // a token is good for one score
+  run.then(t => postScore(board, score, extra, player.name, t)).then(r => {
     b.textContent = !r ? 'Could not post this run' : r.newBest ? `New best, #${r.rank}` : `Your best is #${r.rank}`;
   });
 }
@@ -2325,6 +2329,7 @@ function startGame(fromLink = false) {
   player.kills = player.deaths = 0; player.nadeReady = 0;
   respawn(player); dressVM(); refreshVM();
   if (game === 'aim') startAim();
+  newRun();
   scoresChanged(); updateScoreTop();
   $('death').hidden = true; shake = 0; fx.dmg = 0;
   initAudio();
@@ -2354,7 +2359,7 @@ function playAgain() {
 // pulled in by the host, I wait on one click
 export function beginMatch(m, mine) {
   net.m = m; net.ready = false; net.goAt = 0; // ready was for this match: nobody is ready for the one after it yet
-  player.kills = player.deaths = 0; player.nadeReady = 0; resetRun(); resetZombies(); fx.flash = 0;
+  player.kills = player.deaths = 0; player.nadeReady = 0; resetRun(); resetZombies(); fx.flash = 0; newRun();
   teams.bank = [0, 0]; net.tscore = null; resetBR();
   for (const e of ents) if (e.ai) { e.kills = e.deaths = 0; respawn(e); }
   respawn(player); refreshVM(); endSpec();

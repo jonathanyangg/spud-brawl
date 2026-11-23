@@ -4,6 +4,8 @@
 // - hits from further than the gun reaches
 // - more damage in one report than one shot of that gun can do
 // - more damage to one target over two seconds than the gun's fire rate allows
+// - zombie bites outside a Zombies room, and more of them on one target than a crowd of zombies could land
+// - hits with no shooter position to check the range from
 // Hits arrive as 'h' events in the presence's event ring: [seq, 'h', target id, damage, head, weapon, shooting bot id or ''].
 // Grenades and rockets aren't reported this way (every game works out its own blast damage), so they never reach here.
 import { WEAPONS, WNAMES } from './public/config.js';
@@ -14,6 +16,9 @@ export const MAX_HIT = WEAPONS.map(w => w.dmg * Math.max(1, w.head || 1) * w.pel
 // how far a hit can come from: the gun's range, plus room for where the target was a moment ago
 export const REACH = WEAPONS.map(w => w.range * 1.25 + 6);
 export const ZOMBIE_W = WNAMES.indexOf('Zombie'), ZOMBIE_MAX = 100;
+// zombie bites on one target per window: a bite does at most 35 (18 + wave, capped) every 0.9 s per zombie, so 3 bites
+// in 2 s each; about 10 zombies fit round one player inside the 1.6 m bite reach. 10 x 3 x 35 = 1050 (~525 a second)
+export const ZOMBIE_WINDOW_MAX = 10 * 3 * 35;
 const WINDOW = 2000; // ms
 
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
@@ -25,11 +30,16 @@ const botIn = (pres, id) => { // a bot in a host's state: [bid, name, team, x, y
 
 // shooter: { pres (their latest presence), prev (the one before), hist (Map for the damage window) }; host: the room host's record like shooter's (it runs the bots);
 // presOf(id): a player's last presence. Returns null when the hit is fine, or why it isn't.
-export function checkHit(e, shooter, presOf, host, now) {
+// game: the room's game type.
+export function checkHit(e, shooter, presOf, host, now, game) {
   const [, , tgt, dmg, , w, botId] = e, me = shooter.pres, was = shooter.prev || me;
   if (typeof tgt !== 'string' || !Number.isFinite(dmg) || dmg < 0) return 'malformed';
   if (!me) return 'not in a match';
-  if (w === ZOMBIE_W) return dmg > ZOMBIE_MAX ? 'too much damage' : null; // the zombie host's zombies; no position to check
+  if (w === ZOMBIE_W) { // the zombie host's zombies: only in Zombies, and no position to check, but a cap per window
+    if (game !== 'zombies') return 'no zombies in this game';
+    if (dmg > ZOMBIE_MAX) return 'too much damage';
+    return windowed(shooter, `z>${tgt}`, dmg, ZOMBIE_WINDOW_MAX, now);
+  }
   const gun = WEAPONS[w];
   if (!Number.isInteger(w) || !gun) return 'unknown weapon';
   if (dmg > MAX_HIT[w]) return 'too much damage';
@@ -47,11 +57,15 @@ export function checkHit(e, shooter, presOf, host, now) {
   }
   // the target: another player, or one of the host's bots ('b' + its number); zombies and anything else go unchecked
   const tp = presOf(tgt), tb = tp ? null : botIn(host?.pres, tgt), to = tp ? pos3(tp.p) : tb && pos3(tb.slice(3, 6));
-  if (from && to && dist(from, to) > REACH[w]) return 'out of range';
+  if (!from) return 'no position'; // every real presence (and bot state) carries one, the very first included
+  if (to && dist(from, to) > REACH[w]) return 'out of range';
   // damage to this target over the window: at most one full shot per fire interval (a fast-reload rarity's included), plus one
-  const key = `${botId || ''}>${tgt}`, list = (shooter.hist.get(key) || []).filter(([t]) => now - t < WINDOW);
-  const total = list.reduce((s, [, d]) => s + d, 0) + dmg;
-  if (total > MAX_HIT[w] * (Math.floor(WINDOW / 1000 / (gun.rate * 0.8)) + 1)) return 'too much damage per second';
+  return windowed(shooter, `${botId || ''}>${tgt}`, dmg, MAX_HIT[w] * (Math.floor(WINDOW / 1000 / (gun.rate * 0.8)) + 1), now);
+}
+// the damage window: this hit plus the last two seconds' on the same key (shooter or bot > target) must stay under cap
+function windowed(shooter, key, dmg, cap, now) {
+  const list = (shooter.hist.get(key) || []).filter(([t]) => now - t < WINDOW);
+  if (list.reduce((s, [, d]) => s + d, 0) + dmg > cap) return 'too much damage per second';
   list.push([now, dmg]); shooter.hist.set(key, list);
   if (shooter.hist.size > 64) for (const [k, l] of shooter.hist) if (!l.length || now - l.at(-1)[0] >= WINDOW) shooter.hist.delete(k);
   return null;
@@ -59,14 +73,14 @@ export function checkHit(e, shooter, presOf, host, now) {
 
 // Runs the new events in a presence through checkHit (each event once, the first time it shows up) and drops the
 // ones that failed from this and every later copy of the ring. Returns the presence to relay: raw when nothing changed.
-export function filterPresence(o, raw, shooter, presOf, host, now) {
+export function filterPresence(o, raw, shooter, presOf, host, now, game) {
   shooter.prev = shooter.pres; shooter.pres = o;
   if (!Array.isArray(o.ev) || !o.ev.length) return raw;
   shooter.bad ||= new Set(); shooter.hist ||= new Map();
   for (const e of o.ev) {
     if (!Array.isArray(e) || !Number.isFinite(e[0]) || e[0] <= (shooter.seen ?? -Infinity)) continue;
     shooter.seen = e[0];
-    if (e[1] === 'h') { const why = checkHit(e, shooter, presOf, host, now); if (why) { shooter.bad.add(e[0]); shooter.rejected = (shooter.rejected || 0) + 1; } }
+    if (e[1] === 'h') { const why = checkHit(e, shooter, presOf, host, now, game); if (why) { shooter.bad.add(e[0]); shooter.rejected = (shooter.rejected || 0) + 1; } }
   }
   if (!shooter.bad.size) return raw;
   const lo = o.ev[0]?.[0];
