@@ -8,7 +8,7 @@ import { applyLook } from './skins.js';
 import { $, V3, clamp } from './util.js';
 import {
   BLOOD, CAMO_IDS, CH, DROP_ST, NADE_TYPES, UNIFORM_IDS, Z, _b, angDiff, beginMatch, bodyC, burst, cfg, corpse, damage, decItems, distVol,
-  endGame, ents, game, gunGameStep, hostPeer, mode, muzzleOf, nearestZombie, newEntity, now, oneLife, openChest, player, poseSoldier, prog,
+  endGame, ents, game, gunGameStep, hostPeer, mode, muzzleOf, nearestZombie, newEntity, now, oneLife, openChest, outOfMatch, readyHere, player, poseSoldier, prog,
   refreshVM, resetBR, resetZombies, respawn, scene, setCanopy, setGame, setMap, setTag, settings, soldierMesh, spawnNade, spillItems, squadsOn,
   state, stormState, syncStorm, syncZombies, takeItem, teamScore, teams, teamsOn, toMenu, tracer, winnerNow, zHost, zombieState
 } from './game.js';
@@ -53,7 +53,7 @@ export function netSend(force) {
     a: state === 'playing' && p.alive ? 1 : 0, dd: p.alive ? 0 : 1, hp: Math.ceil(p.hp), k: p.kills, d: p.deaths, ev: net.ev,
     cr: r2(p.crouch), sl: r2(p.slideK), tm: p.team, dr: p.drop ? DROP_ST.indexOf(p.drop.stage) : 0,
     bt: botHost() ? botState() : undefined, sto: botHost() && oneLife() ? stormState() : undefined, tsc: botHost() && teamsOn() ? teamScore() : undefined,
-    sk: prog.uniform, cm: prog.camo[p.guns[p.weapon].id], lv: P.level(prog), su: p.guns[p.weapon].sup ? 1 : 0, lb: state === 'lobby' ? 1 : 0, rd: state === 'lobby' && net.ready ? 1 : 0, ov: state === 'over' ? 1 : 0,
+    sk: prog.uniform, cm: prog.camo[p.guns[p.weapon].id], lv: P.level(prog), su: p.guns[p.weapon].sup ? 1 : 0, lb: state === 'lobby' ? 1 : 0, rd: readyHere() && net.ready ? 1 : 0, ov: state === 'over' ? 1 : 0,
     z: game === 'zombies' && zHost() ? zombieState() : undefined, iv: oneLife() && p.alive ? invState(p) : undefined });
 }
 // battle royale: what I carry, for a squadmate spectating me: [held gun, its mag, spare ammo for it, bandages, medkits,
@@ -107,7 +107,8 @@ export function applyRemote(id, s, seat) {
   if (typeof id !== 'string' || !/^[a-z0-9]{4,16}$/.test(id) || id === net.myPeer) return;
   let r = net.remotes.get(id);
   if (s.v !== 1 || !Array.isArray(s.p)) { if (r) removeRemote(r); return; }
-  if (state === 'lobby' && net.ready && id === net.host && s.lb !== 1 && (s.m | 0) > net.lobbyFrom) { beginMatch(s.m | 0, false); }
+  // the leader started the next match while I was ready for it: in the lobby, or still out of the last one
+  if (net.ready && id === net.host && s.lb !== 1 && ((state === 'lobby' && (s.m | 0) > net.lobbyFrom) || (outOfMatch() && (s.m | 0) > net.m))) { beginMatch(s.m | 0, false); }
   if (!r) {
     const name = cleanName(s.n) || 'Player', color = /^#[0-9a-f]{6}$/i.test(s.c) ? s.c : '#cccccc';
     r = newEntity(name, color, false);

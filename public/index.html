@@ -377,6 +377,7 @@
         <button class="btn ghost" id="deathMenu" type="button">Main menu</button>
       </div>
       <small id="deathKeys" hidden>or press Enter to play again</small>
+      <p class="readyMsg" id="deathReady" hidden></p>
     </div>
   </div>
   <div id="spec" hidden>
@@ -385,7 +386,10 @@
     <div class="row" id="specBtns">
       <button class="btn small" id="specNext" type="button">Next teammate</button>
       <button class="btn ghost small" id="specAgain" type="button" hidden>Play again</button>
+      <button class="btn small" id="specReady" type="button" hidden>Ready up</button>
+      <button class="btn ghost small" id="specLobby" type="button" hidden>Back to lobby</button>
     </div>
+    <small class="readyMsg" id="specReadyMsg" hidden></small>
   </div>
 
   <div id="inv" hidden>
@@ -416,6 +420,7 @@
         <ul id="overUnlocks"></ul>
       </div>
       <table id="overTbl"></table>
+      <p class="readyMsg" id="overReady" hidden></p>
       <div class="actions" style="justify-content:center">
         <button class="btn" id="againBtn" type="button">Play again</button>
         <button class="btn ghost" id="lobbyBtn" type="button" hidden>Back to lobby</button>

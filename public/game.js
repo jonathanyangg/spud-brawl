@@ -993,6 +993,7 @@ document.addEventListener('keydown', e => {
   // times it isn't: dead with the mouse freed for the death buttons, or after the browser refused to recapture it
   if (e.code === 'Escape' && !e.repeat && !locked) { e.preventDefault(); setState('paused'); return; }
   if (e.code === 'Enter' && !e.repeat && !player.alive && mode !== 'online') { e.preventDefault(); playAgain(); return; }
+  if (e.code === 'Enter' && !e.repeat && outOfMatch() && state !== 'over') { e.preventDefault(); toggleReadyOut(); return; }
   if (e.code === binds.jump && !e.repeat && !player.alive && spec.who && state === 'playing') { e.preventDefault(); nextSpec(); return; }
   if (e.repeat) return;
   pressCode(e.code);
@@ -1165,8 +1166,10 @@ function spectate(dt) {
   if (!mates.length) { if (spec.who) endSpec(true); return false; }
   if (!mates.includes(spec.who)) { spec.who = mates[0]; $('death').hidden = true; $('spec').hidden = false; }
   const e = spec.who; setText('specName', e.name); setText('specHp', `${Math.ceil(e.hp || 0)} HP`);
-  setText('specKeys', mates.length > 1 ? `${keyName(binds.jump)} next teammate${mode !== 'online' ? ' \u00b7 Enter play again' : ''}` : mode !== 'online' ? 'Enter play again' : '');
+  const enter = mode !== 'online' ? 'Enter play again' : net.ready ? 'Enter not ready' : 'Enter ready up';
+  setText('specKeys', mates.length > 1 ? `${keyName(binds.jump)} next teammate \u00b7 ${enter}` : enter);
   $('specNext').hidden = mates.length < 2; $('specAgain').hidden = mode === 'online';
+  $('specReady').hidden = $('specLobby').hidden = $('specReadyMsg').hidden = mode !== 'online';
   // over their shoulder, pulled in if a wall is behind them
   fwdVec(e.yaw, 0, _f); _o.set(e.pos.x, e.pos.y + 1.9, e.pos.z);
   const back = Math.min(4.2, rayWorld(_o, _sd.copy(_f).negate(), 4.6) - 0.4);
@@ -1188,12 +1191,16 @@ function endSpec(showDeath) {
 // royale with nobody left in your squad, and then they take you back to the lobby (ready for the next one, or not)
 function deathButtons() {
   const online = mode === 'online', on = !online || (oneLife() && !squadmates().length);
-  $('deathBtns').hidden = !on; $('deathKeys').hidden = online || !on;
+  $('deathBtns').hidden = !on; $('deathKeys').hidden = !on; $('deathReady').hidden = !online || !on;
   $('deathMenu').textContent = online ? 'Back to lobby' : 'Main menu';
+  $('deathKeys').textContent = online ? 'or press Enter to ready up' : 'or press Enter to play again';
+  if (online && on) updateReadyOut();
   if (on) { closeInv(false); if (document.pointerLockElement) document.exitPointerLock(); }
 }
 function deathToLobby(ready) { net.ready = ready; endSpec(); enterLobby(); }
 $('specNext').addEventListener('click', nextSpec);
+$('specReady').addEventListener('click', () => toggleReadyOut());
+$('specLobby').addEventListener('click', () => deathToLobby(false));
 $('specAgain').addEventListener('click', () => playAgain());
 // on the blimp the camera sits behind it and you look around; once you jump it follows behind you so you see
 // yourself fall and glide, and on landing it's your own eyes again
@@ -2222,7 +2229,7 @@ function setState(s) {
   if (s !== 'playing') { for (const k in keys) keys[k] = false; $('board').hidden = true; }
   if (s === 'playing' || s === 'over') { $('controls').hidden = true; rebinding = null; $('settings').hidden = true; $('armory').hidden = true; }
   if (s === 'paused') { $('pInviteBtn').hidden = mode !== 'online'; $('pInviteOut').hidden = true; }
-  if (s === 'over') { $('overTbl').hidden = false; $('lobbyBtn').hidden = mode !== 'online'; $('againBtn').textContent = mode === 'online' ? 'Ready for the next one' : 'Play again'; }
+  if (s === 'over') { $('overTbl').hidden = false; $('lobbyBtn').hidden = mode !== 'online'; $('overReady').hidden = mode !== 'online'; $('againBtn').textContent = 'Play again'; $('againBtn').classList.remove('ghost'); if (mode === 'online') updateReadyOut(); }
   if (s === 'paused') {
     $('pauseTitle').textContent = 'Paused'; $('resumeBtn').textContent = 'Resume';
     $('pauseMsg').textContent = plWorks === false ? 'Press Resume when you are ready.' : 'Click Resume to grab the mouse again.';
@@ -2293,7 +2300,7 @@ function playAgain() {
 // online: start match m (everyone in the lobby was ready). mine: I clicked, so I can grab the mouse;
 // pulled in by the host, I wait on one click
 export function beginMatch(m, mine) {
-  net.m = m;
+  net.m = m; net.ready = false; net.goAt = 0; // ready was for this match: nobody is ready for the one after it yet
   player.kills = player.deaths = 0; player.nadeReady = 0; resetRun(); resetZombies(); fx.flash = 0;
   teams.bank = [0, 0]; net.tscore = null; resetBR();
   for (const e of ents) if (e.ai) { e.kills = e.deaths = 0; respawn(e); }
@@ -2384,7 +2391,7 @@ function renderLobbyUI(groups) {
       const n = document.createElement('b'); n.textContent = e === player ? `${e.name} (you)` : e.name;
       const tag = document.createElement('span');
       const id = e === player ? net.myPeer : e.peer;
-      tag.textContent = [id === net.host ? 'Leader' : '', e === player ? (net.ready ? 'Ready' : 'Not ready') : !e.lobby ? 'In a match' : e.ready ? 'Ready' : 'Not ready', `Lv ${e === player ? P.level(prog) : e.lv || 1}`].filter(Boolean).join(' \u00b7 ');
+      tag.textContent = [id === net.host ? 'Leader' : '', e === player ? (net.ready ? 'Ready' : 'Not ready') : e.ready ? 'Ready' : !e.lobby ? 'In a match' : 'Not ready', `Lv ${e === player ? P.level(prog) : e.lv || 1}`].filter(Boolean).join(' \u00b7 ');
       row.append(dot, n, tag);
       if (isHost && e !== player) { // hand the lead to them
         const b = document.createElement('button'); b.type = 'button'; b.className = 'btn ghost small lbLead'; b.textContent = 'Make leader';
@@ -2395,17 +2402,10 @@ function renderLobbyUI(groups) {
     }
     box.append(col);
   }
-  const n = 1 + net.remotes.size;
-  // battle royale: the leader can't start the next one while anyone is still alive in the last one
-  const still = stillInMatch();
+  // battle royale: the leader can't start the next one while anyone is still alive in the last one,
   // and the room stays locked until then, so nobody joins and the settings can't re-seat the squads mid-match
-  if (isHost && !still && net.unlockDue && net.status === 'ready') { net.unlockDue = false; sendLock(false); }
-  // the match starts by itself a few seconds after everyone in the room is in the lobby and ready (the leader's game
-  // starts it); anyone who un-readies in that time stops the countdown
-  const waiting = [...net.remotes.values()].filter(r => !r.lobby || !r.ready).length + (net.ready ? 0 : 1);
-  const go = net.status === 'ready' && !still && !waiting && !(isHost && net.unlockDue);
-  if (!go) net.goAt = 0; else if (!net.goAt) net.goAt = performance.now() + START_DELAY;
-  const left = Math.max(0, Math.ceil((net.goAt - performance.now()) / 1000));
+  if (isHost && !stillInMatch() && net.unlockDue && net.status === 'ready') { net.unlockDue = false; sendLock(false); }
+  const { n, still, waiting, go, left } = readyTick();
   setText('lobbyMsg', net.status !== 'ready' ? 'Connecting\u2026'
     : still ? `${still} player${still > 1 ? 's are' : ' is'} still alive in the last match. The next one can start when it ends.`
     : go ? `Everyone's ready. Starting in ${left}\u2026`
@@ -2413,9 +2413,39 @@ function renderLobbyUI(groups) {
     : `Waiting for ${waiting} more player${waiting > 1 ? 's' : ''} to get ready.`);
   $('lobbyStart').hidden = true;
   $('lobbyReady').hidden = false; $('lobbyReady').textContent = net.ready ? 'Not ready' : 'Ready'; $('lobbyReady').classList.toggle('ghost', net.ready);
-  if (go && isHost && performance.now() >= net.goAt) { net.goAt = 0; startFromLobby(); }
   renderLobbySet(isHost, still > 0);
 }
+// ---------- ready for the next match: from the lobby, or right where you are once you're out of this one ----------
+// Out of the match: down for good in battle royale (spectating or not), or on the match-over card. Either way the
+// next match starts by itself a few seconds after everyone in the room is ready, wherever they are (the leader's game
+// starts it); anyone who un-readies in that time stops the countdown.
+export const outOfMatch = () => mode === 'online' && (state === 'over' || (oneLife() && !player.alive && !player.drop && (state === 'playing' || state === 'paused')));
+export const readyHere = () => state === 'lobby' || outOfMatch();
+function readyTick() {
+  const n = 1 + net.remotes.size, still = stillInMatch(), isHost = net.host === net.myPeer;
+  const waiting = [...net.remotes.values()].filter(r => !r.ready).length + (net.ready ? 0 : 1);
+  const go = net.status === 'ready' && !still && !waiting && !(isHost && state === 'lobby' && net.unlockDue);
+  if (!go) net.goAt = 0; else if (!net.goAt) net.goAt = performance.now() + START_DELAY;
+  const left = Math.max(0, Math.ceil((net.goAt - performance.now()) / 1000));
+  if (go && isHost && performance.now() >= net.goAt) { net.goAt = 0; startFromLobby(); }
+  return { n, still, waiting, go, left };
+}
+function toggleReadyOut() {
+  if (!outOfMatch()) return;
+  net.ready = !net.ready; netSend(true); updateReadyOut();
+}
+let readyAt = 0;
+function updateReadyOut() {
+  readyAt = performance.now() + 250;
+  const { n, still, waiting, go, left } = readyTick();
+  if (!outOfMatch()) return; // the match just started
+  const msg = !net.ready ? (n === 1 ? 'Ready up to play again, or go back to the lobby.' : `Ready up to play again with this group, or go back to the lobby. It starts once all ${n} of you are ready.`)
+    : go ? `Everyone's ready. Starting in ${left}…`
+    : `Ready. Waiting for ${waiting} more player${waiting > 1 ? 's' : ''}${still ? ` (${still} still in the match)` : ''}.`;
+  for (const id of ['deathReady', 'specReadyMsg', 'overReady']) setText(id, msg);
+  for (const id of ['deathAgain', 'specReady', 'againBtn']) { const b = $(id); b.textContent = net.ready ? 'Not ready' : 'Ready up'; b.classList.toggle('ghost', net.ready); }
+}
+export function readyOutFrame() { if (outOfMatch() && performance.now() > readyAt) updateReadyOut(); }
 // the leader's controls: game, map and that game's options. Each change goes to the server, which tells everyone.
 // busy: a battle royale is still going (the server ignores changes then), so the controls are greyed out
 function renderLobbySet(isHost, busy) {
@@ -2541,8 +2571,8 @@ segment('mapSeg', 'map', v => v, () => { if (state === 'menu') { setMap(settings
 $('nameIn').value = settings.name;
 $('nameIn').addEventListener('keydown', e => { if (e.key === 'Enter' && !$('playBtn').hidden) $('playBtn').click(); });
 $('playBtn').addEventListener('click', () => (settings.mode === 'online' ? createRoom() : startGame()));
-$('againBtn').addEventListener('click', () => (mode === 'online' ? deathToLobby(true) : playAgain())); // online: back to the lobby, ready
-$('deathAgain').addEventListener('click', () => (mode === 'online' ? deathToLobby(true) : playAgain()));
+$('againBtn').addEventListener('click', () => (mode === 'online' ? toggleReadyOut() : playAgain())); // online: ready for the next one, right here
+$('deathAgain').addEventListener('click', () => (mode === 'online' ? toggleReadyOut() : playAgain()));
 $('deathMenu').addEventListener('click', () => (mode === 'online' ? deathToLobby(false) : toMenu()));
 $('menuBtn').addEventListener('click', toMenu);
 $('quitBtn').addEventListener('click', toMenu);
@@ -2620,6 +2650,7 @@ function tick(t) {
     for (let i = piles.length - 1; i >= 0; i--) { const age = now - piles[i].born; if (age > 14) { piles[i].g.scale.setScalar(Math.max(0.01, 1 - (age - 14))); if (age > 15) { scene.remove(piles[i].g); piles.splice(i, 1); } } }
     shake = Math.max(0, shake - dt * 1.5);
   }
+  if (mode === 'online') readyOutFrame(); // also on the match-over card, where the world stands still
   // camera fov for scope
   const baseFov = state === 'menu' ? 75 : settings.fov;
   const targetFov = state !== 'playing' ? baseFov : zoomed ? curW().fov * settings.fov / 75 : baseFov + (player.sprint ? 6 : 0) + 6 * player.slideK;

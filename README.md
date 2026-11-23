@@ -3,8 +3,11 @@
 Arena shooter in the browser (three.js). Play vs bots offline, or online: browse public games or create a room
 (public, or private and joined by code or invite link). Online rooms can have bots too.
 Creating or joining a room opens its lobby: everyone in the room stands in a line-up with their uniform, camo and
-level, grouped by squad or team, and everyone presses Ready: the match starts by itself three seconds after the last player is ready. After a
-match, Back to lobby returns there; anyone who joins while a match is on goes straight in.
+level, grouped by squad or team, and everyone presses Ready: the match starts by itself three seconds after the last player is ready. To play
+again with the same group you don't have to go back: once you're out (down for good in battle royale, spectating or
+not, or on the match-over card) press Ready up (or Enter) right there, or Back to lobby and Ready there. The next
+match starts once everyone in the room is ready, wherever they are. Anyone who joins while a match is on goes
+straight in.
 
 **Games:**
 - **Free-for-all:** first to 20.
