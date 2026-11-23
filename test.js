@@ -235,6 +235,7 @@ const tick = () => new Promise(r => setTimeout(r, 100));
   assert.equal(other.msgs.length, 0, 'rooms are isolated');
   const fest = await open('festroom', 'ffff1', 'depot', 'fest');
   await tick(); assert.equal(fest.game, 'fest'); assert.equal(fest.map, 'frost', 'the event room plays on its own map');
+  assert.equal(fest.cfg.bots, 7); assert.equal(fest.cfg.diff, 'hard', 'the event room has its own bots');
   fest.close();
   const b2 = await open('test', 'bbbb2'); // reconnect with the same id
   await tick();

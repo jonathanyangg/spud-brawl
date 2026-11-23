@@ -19,6 +19,7 @@ const MSG_RATE = 60, MSG_BURST = 120, BYTE_RATE = 512 * 1024, STRIKES = 200;
 const MAPS = ['depot', 'yard', 'dunes', 'frost', 'stack', 'highrise', 'island'];
 const GAMES = ['ffa', 'tdm', 'br', 'zombies', 'gungame', 'moon', 'snipe', 'fest']; // aim trainer is solo, never a room
 const FIXED_MAP = { fest: 'frost' }; // the event plays on its own map
+const FIXED_CFG = { fest: { bots: 7, diff: 'hard' } }; // and with its own bots
 const DIFFS = ['easy', 'normal', 'hard'];
 const int = (v, lo, hi, d) => { const n = parseInt(v, 10); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
@@ -75,6 +76,7 @@ wss.on('connection', (ws, req) => {
     keys: new Map(), // player id -> their secret key, for everyone seated (and, while locked, everyone in the match)
   });
   if (FIXED_MAP[room.game]) room.map = FIXED_MAP[room.game];
+  if (FIXED_CFG[room.game]) Object.assign(room.cfg, FIXED_CFG[room.game]);
   const peers = room.peers, known = room.keys.get(id);
   if (known !== undefined && known !== key) { ws.send('{"t":"taken"}'); ws.close(); return; } // their id, not their key
   const old = peers.get(id);
@@ -155,6 +157,7 @@ function setRoom(room, o) {
   if (o.side === 'split' || o.side === 'together') c.side = o.side;
   if (has('sq')) c.sq = int(o.sq, 1, 4, c.sq);
   if ([0, 25, 50].includes(o.hok)) c.hok = o.hok;
+  if (FIXED_CFG[room.game]) Object.assign(c, FIXED_CFG[room.game]);
   if (typeof o.pub === 'boolean') room.pub = o.pub;
 }
 // team deathmatch seats: 'together' fills the first team with players (bots make up the rest), 'split' evens them out

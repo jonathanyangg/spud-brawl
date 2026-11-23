@@ -41,7 +41,7 @@ export const LOOKS = {
 };
 // Event uniforms: [look, how to get it]. Finishing a match of the event adds the look to the save's ev list, and it
 // stays unlocked after the event ends. Like level unlocks, the game grants it, so it's cosmetic trust among friends.
-export const EVENT_LOOKS = [['frostfest', 'Finish a Frost Fest match']];
+export const EVENT_LOOKS = [['frostfest', 'Win a Frost Fest match (7 hard bots)']];
 const cleanEv = v => (Array.isArray(v) ? [...new Set(v)].filter(id => EVENT_LOOKS.some(([e]) => e === id)) : []);
 // two saves' event looks together, so a cloud sync never takes one away
 export const unionEv = (a, b) => cleanEv([...(a?.ev || []), ...(b?.ev || [])]);

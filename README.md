@@ -30,7 +30,7 @@ straight in.
   kills), and a solo **Aim Trainer**. With accounts on, Aim Trainer (hits, then accuracy) and Zombies (wave, then kills)
   have leaderboards: anyone can open them from the menu, and signed-in players' runs go up, keeping each player's best.
 - **Frost Fest** (limited-time event, through January 10, 2027): free-for-all on Frostbite in falling snow, with slick
-  ground everywhere. Finishing one match unlocks the Frost Fest uniform for good; it stays after the event ends and
+  ground everywhere, against 7 bots on hard (fixed, offline and online). Only a win unlocks the Frost Fest uniform for good; it stays after the event ends and
   syncs with a cloud save. The dates live in `EVENT` in `public/config.js`; outside them the menu hides the mode.
 
 **Maps:** each one has its own file in `public/maps/`. All have several levels, tunnels or covered passages, and jump

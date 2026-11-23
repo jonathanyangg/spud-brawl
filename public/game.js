@@ -433,7 +433,10 @@ export function botSquads(hum, sq, n) {
 }
 const SQUAD_NAMES = ['', 'Solo', 'Duos', 'Trios', 'Squads'];
 // the match settings: the room's online, the menu's offline
-export const cfg = () => (mode === 'online' && net.cfg ? net.cfg : { bots: settings.bots, diff: settings.diff, ts: settings.ts, lim: settings.lim, side: settings.side, sq: clamp(settings.sq | 0, 1, 4), hok: [0, 25, 50].includes(settings.hok) ? settings.hok : 0 });
+export const cfg = () => {
+  const c = mode === 'online' && net.cfg ? net.cfg : { bots: settings.bots, diff: settings.diff, ts: settings.ts, lim: settings.lim, side: settings.side, sq: clamp(settings.sq | 0, 1, 4), hok: [0, 25, 50].includes(settings.hok) ? settings.hok : 0 };
+  return game === EVENT.game ? { ...c, bots: EVENT.bots, diff: EVENT.diff } : c; // the event's bots are fixed
+};
 // team scores: every soldier's kills plus the kills of bots that have left (bank). Online the bot host adds them up.
 export const teams = { bank: [0, 0] };
 export function teamScore() {
@@ -1379,7 +1382,7 @@ function updateModeUI() {
   $('playBtn').hidden = browse;
   $('playBtn').textContent = online ? 'Create room' : 'Play';
   $('gameHelp').textContent = GAME_HELP[g] || '';
-  $('rowMap').hidden = g === EVENT.game; // the event has its own map
+  $('rowMap').hidden = $('rowBots').hidden = $('rowDiff').hidden = g === EVENT.game; // the event has its own map and bots
   if (state === 'menu') { const m = g === EVENT.game ? EVENT.map : settings.map; if (m !== currentMap) { setMap(m); setupBots(5, 'normal'); } }
   if (browse) refreshRooms();
 }
@@ -1419,7 +1422,7 @@ const GAME_HELP = {
   gungame: 'Every two kills hands you the next weapon: AR, SMG, Shotgun, Sniper, RPG, then the knife. One knife kill wins.',
   moon: 'Knives only, in low gravity. Jump high, stab fast. First to 20.',
   snipe: 'Snipers only, and one body shot drops anyone. First to 20.',
-  fest: `Limited time, through ${EVENT.last}. Free-for-all on Frostbite in a snowstorm, and the ground is slick everywhere. Finish one match to unlock the Frost Fest uniform for good. First to 20.`,
+  fest: `Limited time, through ${EVENT.last}. Free-for-all on Frostbite in a snowstorm, and the ground is slick everywhere. You against 7 bots on hard. Win a match to unlock the Frost Fest uniform for good. First to 20.`,
   aim: 'Solo. 60 seconds, as many targets as you can hit.',
 };
 
@@ -2318,7 +2321,7 @@ function startGame(fromLink = false) {
   if (mode === 'online' || !versus()) setupBots(0, settings.diff);
   else if (teamsOn()) { const ts = clamp(settings.ts | 0, 1, 6); setupBots(ts * 2 - 1, settings.diff, [...Array(ts - 1).fill(0), ...Array(ts).fill(1)]); } // you plus ts - 1 bots, against ts bots
   else if (squadsOn()) { const sq = cfg().sq, n = Math.min(11, Math.max(settings.bots, sq)); setupBots(n, settings.diff, botSquads([player], sq, n)); } // your squad first, then bot squads
-  else setupBots(settings.bots, settings.diff);
+  else { const c = cfg(); setupBots(c.bots, c.diff); } // (Frost Fest: always 7 hard bots)
   player.kills = player.deaths = 0; player.nadeReady = 0;
   respawn(player); dressVM(); refreshVM();
   if (game === 'aim') startAim();
@@ -2538,7 +2541,7 @@ export function endGame(winner) {
   endSpec();
   buildTable($('overTbl'));
   if (won) sfx.kill();
-  gainXP(P.XP.match + (won ? P.XP.win : 0), { match: true, win: won, event: game === EVENT.game ? EVENT.look : null });
+  gainXP(P.XP.match + (won ? P.XP.win : 0), { match: true, win: won, event: game === EVENT.game && won ? EVENT.look : null }); // the event's uniform takes a win
   showOverXp();
 }
 function showOverXp() {

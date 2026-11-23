@@ -46,7 +46,8 @@ export const MAX_SLOTS = 4; // the knife plus three guns
 export const GAMES = { ffa: 'Free-for-all', tdm: 'Team Deathmatch', br: 'Battle Royale', zombies: 'Zombies', gungame: 'Gun Game', moon: 'Moon Knives', snipe: 'Snipers Only', aim: 'Aim Trainer', fest: 'Frost Fest' };
 // limited-time event: Frost Fest is free-for-all on Frostbite with slick ice everywhere and snow coming down.
 // Finishing one match unlocks its uniform for good. The menu offers it only between start and end (UTC).
-export const EVENT = { game: 'fest', name: 'Frost Fest', map: 'frost', look: 'frostfest', start: Date.UTC(2026, 10, 20), end: Date.UTC(2027, 0, 11), last: 'January 10' };
+// the event always plays the same way: its map, and 7 hard bots; the uniform takes a win
+export const EVENT = { game: 'fest', name: 'Frost Fest', map: 'frost', look: 'frostfest', bots: 7, diff: 'hard', start: Date.UTC(2026, 10, 20), end: Date.UTC(2027, 0, 11), last: 'January 10' };
 export const eventOn = (t = Date.now()) => t >= EVENT.start && t < EVENT.end;
 // gun game: two kills on each weapon, then one with the knife wins (AR, SMG, Shotgun, Sniper, RPG, Knife)
 export const GUNGAME = [3, 0, 1, 2, 4, 5];
