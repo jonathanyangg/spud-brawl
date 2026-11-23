@@ -53,6 +53,8 @@ const RL = {
   tube: (a, v) => [noise(0.32, 650, 0.3 * v, 'bandpass', 0.9, a), tone(110, 0.1, 0.2 * v, 'sine', 70, a + 0.3)],
   latch: (a, v) => [noise(0.04, 3600, 0.3 * v, 'bandpass', 2.5, a), tone(500, 0.04, 0.1 * v, 'square', 380, a)],
 };
+// the reload clicks are short and narrow-band, so they get lost next to gunfire at the same level: all of them get this boost
+const RL_GAIN = 2.5;
 // [sound, when as a share of the reload time] for each weapon; the shotgun's shells are spread by its mag size
 const RELOADS = [
   [['magOut', 0.1], ['magIn', 0.55], ['rack', 0.8]],                       // SMG
@@ -67,7 +69,7 @@ export function sfxReload(wi, dur, v = 1, shells = 4) {
   if (!ac || muted || v <= 0.02) return () => {};
   const steps = wi === 1 ? [...Array(Math.max(1, Math.min(8, shells))).keys()].map(i => ['shell', 0.08 + 0.62 * i / Math.max(1, shells)]).concat([['pump', 0.8]]) : RELOADS[wi];
   if (!steps) return () => {};
-  const srcs = steps.flatMap(([k, at]) => RL[k](at * dur, v)).filter(Boolean);
+  const srcs = steps.flatMap(([k, at]) => RL[k](at * dur, v * RL_GAIN)).filter(Boolean);
   return () => { for (const s of srcs) try { s.stop(); } catch (e) {} };
 }
 export const sfx = {
