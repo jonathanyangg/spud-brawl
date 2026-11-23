@@ -4,7 +4,7 @@
 import { sfx } from './audio.js';
 import { LIMIT } from './world.js';
 import { $, V3, clamp } from './util.js';
-import { camera, ents, isUp, now, player, rayWorld, sameTeam, spec, state } from './game.js';
+import { camera, ents, isUp, now, player, rayWorld, sameTeam, spec, state, supplyStatus } from './game.js';
 import { net, netEvent } from './netsync.js';
 import { MM } from './hud.js';
 
@@ -82,18 +82,20 @@ export function remotePing(r, e) {
 }
 
 // ---------- drawing ----------
-// on screen: a marker over each ping with who placed it and how far it is
+// on screen: a marker over each ping with who placed it and how far it is, and one over the supply drop
 const els = new Map();
 export function updatePings() {
   const layer = $('pings'), show = state === 'playing' && !MM.big;
   for (const [who, p] of pings) if (now - p.at > LIFE || now < p.at) pings.delete(who);
-  for (const [who, el] of els) if (!pings.has(who) || !show) { el.remove(); els.delete(who); }
+  const sd = show ? supplyStatus() : null, list = [...pings];
+  if (sd) list.push(['supply', { x: sd.x, y: sd.y + (sd.landed ? 3 : 1), z: sd.z, supply: sd }]);
+  for (const [who, el] of els) if (!list.some(([w]) => w === who)) { el.remove(); els.delete(who); }
   if (!show) return;
   const W = layer.clientWidth, H = layer.clientHeight, me = player.alive ? player : spec.who || player;
-  for (const [who, p] of pings) {
+  for (const [who, p] of list) {
     let el = els.get(who);
-    if (!el) { el = document.createElement('div'); el.className = 'ping'; el.innerHTML = '<i></i><b></b>'; layer.append(el); els.set(who, el); }
-    el.classList.toggle('enemy', p.enemy);
+    if (!el) { el = document.createElement('div'); el.className = 'ping' + (p.supply ? ' supply' : ''); el.innerHTML = '<i></i><b></b>'; layer.append(el); els.set(who, el); }
+    el.classList.toggle('enemy', !!p.enemy);
     _v.set(p.x, p.y, p.z).project(camera);
     const behind = _v.z > 1;
     // off screen or behind me: pinned to the edge, pointing the right way
@@ -102,8 +104,13 @@ export function updatePings() {
     const m = Math.max(Math.abs(sx), Math.abs(sy));
     if (behind || m > 0.94) { const f = 0.94 / Math.max(m, 1e-6); sx *= f; sy *= f; }
     el.style.transform = `translate(${((sx + 1) / 2) * W}px, ${((1 - sy) / 2) * H}px)`;
-    const dist = Math.hypot(p.x - me.pos.x, p.z - me.pos.z);
-    el.querySelector('b').textContent = `${p.enemy ? 'Enemy' : p.name} · ${Math.round(dist)} m`;
+    const dist = Math.round(Math.hypot(p.x - me.pos.x, p.z - me.pos.z));
+    if (p.supply) {
+      const es = Math.ceil(p.supply.eta), eta = `${Math.floor(es / 60)}:${String(es % 60).padStart(2, '0')}`;
+      el.querySelector('b').textContent = p.supply.landed ? `Supply drop · ${dist} m` : `Supply drop · lands in ${eta} · ${dist} m`;
+      continue;
+    }
+    el.querySelector('b').textContent = `${p.enemy ? 'Enemy' : p.name} · ${dist} m`;
     el.style.opacity = clamp((LIFE - (now - p.at)) / 1.5, 0, 1);
   }
 }

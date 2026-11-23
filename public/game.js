@@ -1545,7 +1545,7 @@ const supplyM = {
   beam: new THREE.MeshBasicMaterial({ color: 0xff9a3c, transparent: true, opacity: 0.3, depthWrite: false }),
 };
 function resetSupply() {
-  Object.assign(SUPPLY, { state: oneLife() && FLIGHT.on ? 'wait' : 'off', crate: null, warned: false, pendingOpen: false });
+  Object.assign(SUPPLY, { state: oneLife() && FLIGHT.on ? 'wait' : 'off', crate: null, warned: false, pendingOpen: false, landAt: 0 });
   if (SUPPLY.state === 'off') return;
   const r = rng(hashStr(brKey() + ':supply')), lim = HALF * 0.7;
   const spots = SPAWNS.filter(s => Math.abs(s[0]) < lim && Math.abs(s[1]) < lim);
@@ -1563,6 +1563,16 @@ function resetSupply() {
   SUPPLY.x = s[0]; SUPPLY.z = s[1]; // the route crosses the island with the drop spot halfway along
   SUPPLY.ax = s[0] - dx * L; SUPPLY.az = s[1] - dz * L; SUPPLY.bx = s[0] + dx * L; SUPPLY.bz = s[1] + dz * L;
   SUPPLY.dur = 2 * L / 22; SUPPLY.at = FLIGHT.t0 + FLIGHT.dur * 1.25 + SUPPLY_AFTER;
+}
+// where the supply drop is, for the map and the on-screen marker: from the warning until someone opens it.
+// eta: seconds until it touches down (0 once it has)
+export function supplyStatus() {
+  const S = SUPPLY, c = S.crate;
+  if (S.state === 'off' || !S.warned || (c && c.open)) return null;
+  if (c && !c.falling) return { x: S.x, y: c.y, z: S.z, landed: true, eta: 0 };
+  if (c) return { x: S.x, y: c.y, z: S.z, landed: false, eta: (c.y - c.gy) / CRATE_FALL };
+  if (!S.landAt) { const y0 = FLIGHT.y - 5; S.landAt = S.at + S.dur * 0.5 + Math.max(0, y0 - floorBelow(S.x, y0, S.z)) / CRATE_FALL; }
+  return { x: S.x, y: FLIGHT.y, z: S.z, landed: false, eta: Math.max(0, S.landAt - now) };
 }
 function spawnCrate() {
   const y0 = FLIGHT.y - 5, gy = floorBelow(SUPPLY.x, y0, SUPPLY.z);

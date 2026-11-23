@@ -349,6 +349,8 @@ tr.me td{color:var(--butter)}
 .ping i{width:14px;height:14px;transform:rotate(45deg);background:#ffd23f;border:2px solid #1b1208;box-shadow:0 0 10px rgba(255,210,63,.7)}
 .ping b{margin-top:5px;font-size:12px;color:#fff6e0;text-shadow:0 1px 2px #000;white-space:nowrap}
 .ping.enemy i{background:#ff5a4a;box-shadow:0 0 10px rgba(255,90,74,.8)}
+.ping.supply i{width:16px;height:16px;transform:none;border-radius:3px;background:#ff7a1a;box-shadow:0 0 12px rgba(255,122,26,.8)}
+.ping.supply b{color:#ffb066}
 
 /* ready up for the next match without leaving: on the death card, while spectating, and on the match-over card */
 .readyMsg{color:var(--cream);font-size:13px;margin:6px 0 0;text-align:center}

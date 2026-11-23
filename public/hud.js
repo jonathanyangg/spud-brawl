@@ -5,7 +5,7 @@ import { sfx } from './audio.js';
 import * as P from './progress.js';
 import { $, V3, clamp } from './util.js';
 import {
-  AIM, CH, FLIGHT, SUPPLY, Z, binds, brAlive, camera, carries, currentSpread, dressVM, ents, fixSlots, flightT, game, gunsFor, host, isUp, knifeFull,
+  AIM, CH, FLIGHT, SUPPLY, Z, supplyStatus, binds, brAlive, camera, carries, currentSpread, dressVM, ents, fixSlots, flightT, game, gunsFor, host, isUp, knifeFull,
   lootName, nadesOn, nearChest, nearGun, now, oneLife, player, prog, rarCss, rayWorld, refreshVM, sameTeam, saveProgress, scoreLimit, slotIdx,
   spec, squadmates, squadsOn, state, storm, stormText, teamScore, teamsOn, zLeft, zoomed
 } from './game.js';
@@ -247,8 +247,27 @@ function drawMinimap() {
   }
   g.fillStyle = '#ffc83d';
   for (const c of CH.list) if (!c.open && !c.supply && Math.hypot(c.x - player.pos.x, c.z - player.pos.z) < 45) g.fillRect(X(c.x) - 3 * u, X(c.z) - 3 * u, 6 * u, 6 * u);
-  if (SUPPLY.warned && !(SUPPLY.crate && SUPPLY.crate.open)) { // the supply drop: wherever it is
-    g.fillStyle = '#ff7a1a'; g.strokeStyle = '#1b1208'; g.lineWidth = 2 * u; g.fillRect(X(SUPPLY.x) - 6 * u, X(SUPPLY.z) - 6 * u, 12 * u, 12 * u); g.strokeRect(X(SUPPLY.x) - 6 * u, X(SUPPLY.z) - 6 * u, 12 * u, 12 * u);
+  const sd = supplyStatus();
+  if (sd) { // the supply drop: the plane's route while it's on the way, a ring where it lands, and a label
+    const sx = X(sd.x), sz = X(sd.z);
+    if (SUPPLY.state !== 'done') {
+      g.setLineDash([8 * u, 8 * u]); g.strokeStyle = 'rgba(255,154,60,.7)'; g.lineWidth = 2 * u;
+      g.beginPath(); g.moveTo(X(SUPPLY.ax), X(SUPPLY.az)); g.lineTo(X(SUPPLY.bx), X(SUPPLY.bz)); g.stroke(); g.setLineDash([]);
+      if (SUPPLY.state === 'fly') {
+        const t = clamp((now - SUPPLY.at) / SUPPLY.dur, 0, 1); g.fillStyle = '#ff9a3c';
+        g.beginPath(); g.arc(X(SUPPLY.ax + (SUPPLY.bx - SUPPLY.ax) * t), X(SUPPLY.az + (SUPPLY.bz - SUPPLY.az) * t), 6 * u, 0, Math.PI * 2); g.fill();
+      }
+    }
+    const ring = (sd.landed ? 13 : 13 + 5 * Math.sin(now * 6)) * u; // it pulses until it lands
+    g.strokeStyle = '#ff7a1a'; g.lineWidth = 3 * u; g.beginPath(); g.arc(sx, sz, ring, 0, Math.PI * 2); g.stroke();
+    g.fillStyle = '#ff7a1a'; g.strokeStyle = '#1b1208'; g.lineWidth = 2 * u;
+    g.fillRect(sx - 6 * u, sz - 6 * u, 12 * u, 12 * u); g.strokeRect(sx - 6 * u, sz - 6 * u, 12 * u, 12 * u);
+    const es = Math.ceil(sd.eta), eta = `${Math.floor(es / 60)}:${String(es % 60).padStart(2, '0')}`;
+    const text = MM.big ? `Supply drop · ${sd.landed ? 'landed' : 'lands in ' + eta}` : sd.landed ? 'Supply drop' : `Drop ${eta}`;
+    const fs = MM.big ? 22 : 24; g.font = `700 ${fs}px system-ui, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'bottom';
+    const w = g.measureText(text).width, tx = clamp(sx, w / 2 + 4, S - w / 2 - 4);
+    let ty = sz - ring - 4 * u; if (ty - fs < 2) { g.textBaseline = 'top'; ty = sz + ring + 4 * u; }
+    g.lineWidth = 5; g.strokeStyle = '#1b1208'; g.lineJoin = 'round'; g.strokeText(text, tx, ty); g.fillStyle = '#ffb066'; g.fillText(text, tx, ty);
   }
   if (storm.on) {
     g.fillStyle = 'rgba(150,60,220,.45)'; g.beginPath(); g.rect(0, 0, S, S); g.arc(X(storm.x), X(storm.z), Math.max(0, storm.r * k), 0, Math.PI * 2, true); g.fill('evenodd');
