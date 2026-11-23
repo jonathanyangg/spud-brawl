@@ -22,6 +22,11 @@ import {
 } from './hud.js';
 import { moveMapCursor, pingAim, pingMap, updatePings } from './ping.js';
 import { VEH, driveVehicle, enterVehicle, exitVehicle, nearVehicle, resetVehicles, updateVehicles } from './vehicles.js';
+import { AIM, aimTarget, startAim, stopAim, updateAim } from './modes/aim.js';
+import { boardRow, newRun } from './modes/runs.js';
+import { resetZombies, updateZombies, Z, zombieDied } from './modes/zombies.js';
+export { hostPeer, nearestZombie, resetZombies, syncZombies, Z, zHost, zLeft, zombieState } from './modes/zombies.js';
+export { AIM } from './modes/aim.js';
 
 const UP = new V3(0, 1, 0);
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1051,7 +1056,7 @@ document.addEventListener('pointerlockchange', () => {
 });
 document.addEventListener('pointerlockerror', () => { if (plWorks !== true) plWorks = false; });
 // back from the dead in a bot game: take the mouse again (or ask for a click if the browser says no)
-function relockAfterDeath() {
+export function relockAfterDeath() {
   if (locked || plWorks === false || state !== 'playing') return;
   requestLock();
   setTimeout(() => { if (!locked && state === 'playing' && player.alive) toast('Click to keep playing'); }, 400);
@@ -2212,203 +2217,8 @@ export function resetBR() {
   MM.at = 0;
 }
 
-// ---------- zombies: co-op waves ----------
-// Offline, or online as the host (the lowest player id still in this match), this client runs the zombies.
-// Everyone else draws them from the host's presence and sends their hits on zombies to the host.
-// If the host leaves, the next lowest id picks up the zombies where they are.
-export const Z = { wave: 0, toSpawn: 0, nextSpawn: 0, breakUntil: 0, list: [], byId: new Map(), nextId: 1, over: false, overAt: 0, left: 0 };
-const ZOMBIE_W = WNAMES.indexOf('Zombie');
-const ZOMBIE_LOOKS = ['woodland', 'urban', 'desert', 'olive', 'night'];
-export function hostPeer() { let lo = net.myPeer; for (const r of net.remotes.values()) if (r.m === net.m && r.peer < lo) lo = r.peer; return lo; }
-export const zHost = () => mode !== 'online' || hostPeer() === net.myPeer;
-const humans = () => [player, ...[...net.remotes.values()].filter(r => r.m === net.m)];
-export const zLeft = () => (zHost() ? Z.toSpawn + Z.list.length : Z.left);
-export function nearestZombie(pos) { let best = null, bd = Infinity; for (const z of Z.list) { const d = z.pos.distanceTo(pos); if (d < bd) { bd = d; best = z; } } return best; }
-function addZombie(id, x, z, remote) {
-  const e = newEntity('Zombie', '#7da34a', false, []);
-  Object.assign(e, { zombie: true, zid: id, peer: 'z' + id, remote, target: new V3(x, 0, z), tyaw: 0, atkReady: 0, sideT: 0, side: 1 });
-  e.pos.set(x, 0, z); e.alive = true; e.hp = 50 + Z.wave * 12;
-  e.speed = Math.min(6.8, 3.4 + Z.wave * 0.25) * (Math.random() < 0.2 ? 1.3 : 1); // a few sprinters
-  e.mesh = soldierMesh('', '#5f7f3a', true, { uniform: pick(ZOMBIE_LOOKS) });
-  const u = e.mesh.userData; u.skinM.color.setHex(0x8fae6a); u.aim.children.slice(4, 7).forEach(c => { c.visible = false; }); // green skin, no gun
-  e.mesh.position.copy(e.pos);
-  Z.list.push(e); Z.byId.set(id, e); ents.push(e);
-  return e;
-}
-function removeZombie(z, died) {
-  if (died) { bodyC(z, _b); burst(_b, [0x5a7a2a, ...BLOOD], 12, 5, 0.1, 0.8); }
-  z.alive = false; scene.remove(z.mesh);
-  Z.list.splice(Z.list.indexOf(z), 1); Z.byId.delete(z.zid);
-  const i = ents.indexOf(z); if (i >= 0) ents.splice(i, 1);
-}
-export function resetZombies() {
-  for (const z of [...Z.list]) removeZombie(z, false);
-  Object.assign(Z, { wave: 0, toSpawn: 0, nextSpawn: 0, breakUntil: 0, nextId: 1, over: false, overAt: 0, left: 0 });
-}
-function zombieDied(z, src, wname, head) {
-  removeZombie(z, true);
-  if (src === player) { player.kills++; sfx.kill(); if (state === 'playing') awardKill(wname, head); }
-  else if (src && src.remote && !src.zombie) netEvent('zx', src.peer, WNAMES.indexOf(wname), head ? 1 : 0);
-  updateScoreTop();
-}
-// every client, when a new wave starts: the downed get back up
-function onWave(w) {
-  if (state !== 'playing' && state !== 'paused') return;
-  toast('Wave <em></em>', String(w), false); sfx.kill();
-  if (!player.alive) { respawn(player); $('death').hidden = true; refreshVM(); relockAfterDeath(); }
-}
-// a free spot at least 12 m from every living player
-function zombieSpawnPoint() {
-  const hs = humans().filter(h => h.alive);
-  const ok = SPAWNS.filter(s => hs.every(h => Math.hypot(h.pos.x - s[0], h.pos.z - s[1]) > 12));
-  return pick(ok.length ? ok : SPAWNS);
-}
-const inPlay = h => h.alive && (h !== player || state === 'playing'); // a paused host isn't chased
-function updateZombies(dt) {
-  if (game !== 'zombies') return;
-  const host = zHost();
-  for (const z of Z.list) z.remote = !host;
-  if (!host) { // draw the host's zombies
-    for (const z of Z.list) {
-      const px = z.pos.x, pz = z.pos.z;
-      if (z.pos.distanceTo(z.target) > 6) z.pos.copy(z.target); else z.pos.lerp(z.target, 1 - Math.pow(0.0005, dt));
-      z.yaw += angDiff(z.yaw, z.tyaw) * Math.min(1, dt * 12);
-      z.vel.set((z.pos.x - px) / Math.max(dt, 1e-3), 0, (z.pos.z - pz) / Math.max(dt, 1e-3));
-      poseSoldier(z, dt);
-    }
-    return;
-  }
-  if (Z.over) { if (now >= Z.overAt && state === 'playing') endZombies(); return; }
-  const hs = humans();
-  if (Z.wave > 0 && hs.every(h => (h === player ? !h.alive : h.dead))) { Z.over = true; Z.overAt = now + 2; return; } // everyone down
-  if (!Z.list.length && Z.toSpawn <= 0) {
-    if (!Z.breakUntil) Z.breakUntil = now + (Z.wave ? 6 : 3);
-    else if (now >= Z.breakUntil) {
-      Z.breakUntil = 0; Z.wave++;
-      Z.toSpawn = Math.round((4 + Z.wave * 3) * (1 + 0.5 * (hs.length - 1)));
-      onWave(Z.wave);
-    }
-  }
-  if (Z.toSpawn > 0 && Z.list.length < 20 && now >= Z.nextSpawn) {
-    const sp = zombieSpawnPoint(); addZombie(Z.nextId++, sp[0] + rand(-1, 1), sp[1] + rand(-1, 1), false); Z.toSpawn--;
-    Z.nextSpawn = now + Math.max(0.35, 1.5 - Z.wave * 0.08);
-  }
-  for (const z of [...Z.list]) updateZombie(z, dt, hs);
-}
-function updateZombie(z, dt, hs) {
-  let tgt = null, bd = Infinity;
-  for (const h of hs) if (inPlay(h)) { const d = h.pos.distanceTo(z.pos); if (d < bd) { bd = d; tgt = h; } }
-  const wish = new V3();
-  if (tgt && now >= z.blindUntil) {
-    const wp = navPoint(z, stairWaypoint(z, tgt.pos) || tgt.pos); // a target on another floor: head for the stairs
-    wish.set(wp.x - z.pos.x, 0, wp.z - z.pos.z).normalize();
-    if (now < z.sideT) wish.set(-wish.z * z.side, 0, wish.x * z.side).addScaledVector(wish, 0.3).normalize(); // detour round a wall
-    if (bd < 1.6 && now >= z.atkReady && Math.abs(tgt.pos.y - z.pos.y) < 1.5) {
-      z.atkReady = now + 0.9;
-      const dmg = Math.min(35, 18 + Z.wave);
-      if (tgt === player) damage(player, dmg, z, 'Zombie', false, null);
-      else netEvent('h', tgt.peer, dmg, 0, ZOMBIE_W);
-    }
-  }
-  const sp = z.speed * (now < z.stunUntil ? 0.4 : 1), k = z.launched ? 0 : Math.min(1, (z.onGround ? 8 * grip(z) : 2) * dt);
-  z.vel.x += (wish.x * sp - z.vel.x) * k; z.vel.z += (wish.z * sp - z.vel.z) * k;
-  moveEntity(z, dt);
-  // blocked: climb the wall if the target is higher up (zombies scale buildings), otherwise go round
-  if (z.bumped && tgt && tgt.pos.y > z.pos.y + 1) z.vel.y = 3.5;
-  else if (z.bumped && now >= z.sideT) { z.sideT = now + 0.9; z.side = Math.random() < 0.5 ? -1 : 1; if (z.onGround) z.vel.y = JUMP * 0.8; }
-  const lim = LIMIT - R; z.pos.x = clamp(z.pos.x, -lim, lim); z.pos.z = clamp(z.pos.z, -lim, lim); // never over the boundary wall
-  if (wish.lengthSq() > 0) z.yaw += angDiff(z.yaw, Math.atan2(-wish.x, -wish.z)) * Math.min(1, dt * 8);
-  poseSoldier(z, dt);
-}
-// what the host sends: wave, game over, zombies left, and each zombie [id, x, y, z, yaw, hp]
-export function zombieState() {
-  return { w: Z.wave, o: Z.over ? 1 : 0, n: zLeft(), l: Z.list.map(z => [z.zid, r2(z.pos.x), r2(z.pos.y), r2(z.pos.z), r2(z.yaw), Math.ceil(z.hp)]) };
-}
-export function syncZombies(zs) {
-  if (!zs || typeof zs !== 'object' || !Array.isArray(zs.l)) return;
-  const w = clamp(zs.w | 0, 0, 9999);
-  if (w > Z.wave) { Z.wave = w; onWave(w); } else Z.wave = w;
-  Z.left = clamp(zs.n | 0, 0, 9999);
-  const seen = new Set();
-  for (const a of zs.l.slice(0, 40)) {
-    if (!Array.isArray(a)) continue;
-    const id = a[0] | 0; if (id <= 0) continue;
-    seen.add(id);
-    const x = clamp(num(a[1]), -LIMIT, LIMIT), y = clamp(num(a[2]), 0, 40), zz = clamp(num(a[3]), -LIMIT, LIMIT);
-    const z = Z.byId.get(id) || addZombie(id, x, zz, true);
-    z.target.set(x, y, zz); z.tyaw = num(a[4]); z.hp = num(a[5]);
-    Z.nextId = Math.max(Z.nextId, id + 1);
-  }
-  for (const z of [...Z.list]) if (!seen.has(z.zid)) removeZombie(z, true);
-  if (zs.o === 1 && state === 'playing') endZombies();
-}
-function endZombies() {
-  if (state === 'over') return;
-  setState('over');
-  $('overTitle').textContent = `Overrun on wave ${Z.wave}`;
-  buildTable($('overTbl'));
-  gainXP(P.XP.match + 60 * Z.wave, { match: true });
-  showOverXp();
-  boardRow('zombies', Z.wave, player.kills | 0);
-}
-// the leaderboard run token for this Aim Trainer or Zombies run (a promise; null inside when there's none)
-let runToken = Promise.resolve(null);
-const newRun = () => { runToken = boards.on && (game === 'aim' || game === 'zombies') ? startRun(game) : Promise.resolve(null); };
-// the over card's leaderboard line: where this run put you, or how to get on the board
-function boardRow(board, score, extra) {
-  if (!boards.on) return;
-  const tbl = $('overTbl'), tr = document.createElement('tr'), a = document.createElement('td'), b = document.createElement('td');
-  a.textContent = 'Leaderboard'; tr.append(a, b); tbl.append(tr);
-  if (!boards.signedIn) { b.textContent = 'Sign in to post your runs'; return; }
-  b.textContent = 'Posting…';
-  const run = runToken; runToken = Promise.resolve(null); // a token is good for one score
-  run.then(t => postScore(board, score, extra, player.name, t)).then(r => {
-    b.textContent = !r ? 'Could not post this run' : r.newBest ? `New best, #${r.rank}` : `Your best is #${r.rank}`;
-  });
-}
-
-// ---------- aim trainer: 60 seconds, hit as many targets as you can ----------
-export const AIM = { list: [], end: 0, hits: 0, shots: 0 };
-const aimM = new THREE.MeshLambertMaterial({ color: 0xe5432d, emissive: 0x501010 }), aimG = new THREE.SphereGeometry(0.45, 16, 12);
-// put a target somewhere in front of the player, 8 to 26 m out, in plain sight
-function aimTarget(tg) {
-  for (let i = 0; i < 40; i++) {
-    const a = player.yaw + rand(-0.9, 0.9), d = rand(8, 26);
-    const p = new V3(player.pos.x - Math.sin(a) * d, rand(0.8, 3.5), player.pos.z - Math.cos(a) * d);
-    if (Math.abs(p.x) > HALF || Math.abs(p.z) > HALF) continue;
-    eyePos(player, _o); const dir = p.clone().sub(_o), dist = dir.length(); dir.divideScalar(dist);
-    if (rayWorld(_o, dir, dist) < dist - 0.6) continue;
-    tg.base = p; tg.phase = rand(0, 6); tg.m.position.copy(p); return;
-  }
-  tg.base = new V3(rand(-4, 4), 2, rand(-4, 4)); tg.phase = 0; tg.m.position.copy(tg.base);
-}
-function startAim() {
-  stopAim(); AIM.end = now + 60; AIM.hits = AIM.shots = 0;
-  for (let i = 0; i < 3; i++) { const tg = { m: new THREE.Mesh(aimG, aimM), r: 0.45 }; tg.m.castShadow = true; scene.add(tg.m); AIM.list.push(tg); aimTarget(tg); }
-}
-function stopAim() { for (const t of AIM.list) scene.remove(t.m); AIM.list.length = 0; }
-function updateAim() {
-  if (game !== 'aim') return;
-  const sway = Math.min(1.8, AIM.hits / 10); // targets start drifting once you're warmed up
-  for (const t of AIM.list) t.m.position.x = t.base.x + Math.sin(now * 1.3 + t.phase) * sway;
-  if (now >= AIM.end && state === 'playing') endAim();
-}
-function endAim() {
-  setState('over');
-  const acc = AIM.shots ? Math.round(100 * AIM.hits / AIM.shots) : 0, best = AIM.hits > prog.bestAim;
-  if (best) prog.bestAim = AIM.hits;
-  $('overTitle').textContent = `${AIM.hits} hits · ${acc}% accuracy`;
-  const tbl = $('overTbl'); tbl.textContent = '';
-  for (const [k, v] of [['Shots', AIM.shots], ['Personal best', best ? `${prog.bestAim} (new!)` : prog.bestAim]]) {
-    const tr = document.createElement('tr'), a = document.createElement('td'), b = document.createElement('td'); a.textContent = k; b.textContent = v; tr.append(a, b); tbl.append(tr);
-  }
-  gainXP(P.XP.match + AIM.hits * 8, { match: true });
-  showOverXp(); stopAim();
-  boardRow('aim', AIM.hits, acc);
-}
-
 // ---------- state ----------
-function setState(s) {
+export function setState(s) {
   state = s;
   setMusic(s === 'menu' || s === 'lobby' ? 'menu' : null); // the soundtrack is for the menu (and lobby) only: matches are quiet
   $('lobby').hidden = s !== 'lobby';
@@ -2707,7 +2517,7 @@ export function endGame(winner) {
   gainXP(P.XP.match + (won ? P.XP.win : 0), { match: true, win: won, event: game === EVENT.game && won ? EVENT.look : null }); // the event's uniform takes a win
   showOverXp();
 }
-function showOverXp() {
+export function showOverXp() {
   const lv = P.level(prog);
   $('overGain').textContent = `+${run.xp} XP`;
   $('overLv').textContent = lv > run.startLv ? `Level ${run.startLv} \u2192 ${lv}` : `Level ${lv}`;
