@@ -82,7 +82,7 @@ export function navPoint(e, wp) {
   // the grid keeps a body's width off walls, so follow it unless the spot is right there (a straight ray can
   // slip past a corner that the body then snags on)
   if (e.climb || e.pos.y > 0.6 || (Math.hypot(wp.x - e.pos.x, wp.z - e.pos.z) < 2 && clearTo(e, wp.x, wp.z))) return wp;
-  if (navMap !== currentMap) { nav = buildNav(boxes, LIMIT, R, STEP, H, PADS.filter(p => p.y < 0.6).map(p => ({ x: p.x, z: p.z, r: PAD_R }))); navMap = currentMap; }
+  if (navMap !== currentMap) { nav = buildNav(boxes.filter(b => !b.dyn), LIMIT, R, STEP, H, PADS.filter(p => p.y < 0.6).map(p => ({ x: p.x, z: p.z, r: PAD_R }))); navMap = currentMap; }
   return navToward(nav, e.pos.x, e.pos.z, wp.x, wp.z) || wp;
 }
 // nothing solid between e and (x, z) at knee height

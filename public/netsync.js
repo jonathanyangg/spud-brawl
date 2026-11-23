@@ -15,6 +15,7 @@ import {
 import { botState, byId, humansInMatch, makeBot, myBot, removeNetBot, syncBots } from './bots.js';
 import { addFeed, awardKill, scoresChanged, toast, updateScoreTop } from './hud.js';
 import { remotePing } from './ping.js';
+import { releaseDriver, remoteVehicle, vehicleState } from './vehicles.js';
 
 // ---------- online play ----------
 // Every player streams a presence (position, aim, score, a ring of recent events) through the relay.
@@ -54,6 +55,7 @@ export function netSend(force) {
     cr: r2(p.crouch), sl: r2(p.slideK), tm: p.team, dr: p.drop ? DROP_ST.indexOf(p.drop.stage) : 0,
     bt: botHost() ? botState() : undefined, sto: botHost() && oneLife() ? stormState() : undefined, tsc: botHost() && teamsOn() ? teamScore() : undefined,
     sk: prog.uniform, cm: prog.camo[p.guns[p.weapon].id], lv: P.level(prog), su: p.guns[p.weapon].sup ? 1 : 0, lb: state === 'lobby' ? 1 : 0, rd: readyHere() && net.ready ? 1 : 0, ov: state === 'over' ? 1 : 0,
+    vh: p.vehicle && p.alive ? vehicleState(p.vehicle) : undefined,
     z: game === 'zombies' && zHost() ? zombieState() : undefined, iv: oneLife() && p.alive ? invState(p) : undefined });
 }
 // battle royale: what I carry, for a squadmate spectating me: [held gun, its mag, spare ammo for it, bandages, medkits,
@@ -99,7 +101,7 @@ export function leaveRoom() {
   resetZombies();
 }
 function removeRemote(r) {
-  scene.remove(r.mesh); net.remotes.delete(r.peer);
+  releaseDriver(r); scene.remove(r.mesh); net.remotes.delete(r.peer);
   const i = ents.indexOf(r); if (i >= 0) ents.splice(i, 1);
   scoresChanged(); if (state !== 'menu') updateScoreTop();
 }
@@ -144,6 +146,7 @@ export function applyRemote(id, s, seat) {
   if (alive && !r.alive) { r.alive = true; r.pos.copy(r.target); r.yaw = r.tyaw; r.mesh.visible = true; poseSoldier(r, 0); }
   else if (!alive && r.alive) { r.alive = false; r.mesh.visible = false; }
   remoteDrop(r, s.dr);
+  if (remoteVehicle(r, r.alive ? s.vh : null, net.myPeer)) toast(`<em></em> got to the wheel first`, r.name, false);
   const last = net.lastSeq.get(id) || 0; let max = last;
   for (const e of (Array.isArray(s.ev) ? s.ev : [])) {
     const sq = num(e && e[0]); if (!(sq > last)) continue;

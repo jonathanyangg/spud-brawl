@@ -11,6 +11,7 @@ import {
 } from './game.js';
 import { net } from './netsync.js';
 import { clearPings, drawPings, mapCursorHome } from './ping.js';
+import { VEH, nearVehicle } from './vehicles.js';
 
 // ---------- HUD ----------
 const txtCache = new Map();
@@ -223,7 +224,7 @@ function mmBase() {
   const S = MM.S, c = document.createElement('canvas'); c.width = c.height = S;
   const g = c.getContext('2d'), k = S / (2 * LIMIT);
   g.fillStyle = '#5f7448'; g.fillRect(0, 0, S, S);
-  const list = boxes.filter(b => b.max.y > 0.3 && (b.max.x - b.min.x) * (b.max.z - b.min.z) < LIMIT * LIMIT).sort((a, b) => a.max.y - b.max.y);
+  const list = boxes.filter(b => !b.dyn && b.max.y > 0.3 && (b.max.x - b.min.x) * (b.max.z - b.min.z) < LIMIT * LIMIT).sort((a, b) => a.max.y - b.max.y);
   for (const b of list) {
     const t = clamp(b.max.y / 9, 0, 1);
     g.fillStyle = `rgb(${Math.round(110 + 110 * t)},${Math.round(104 + 100 * t)},${Math.round(88 + 90 * t)})`;
@@ -273,6 +274,13 @@ function drawMinimap() {
     g.fillStyle = 'rgba(150,60,220,.45)'; g.beginPath(); g.rect(0, 0, S, S); g.arc(X(storm.x), X(storm.z), Math.max(0, storm.r * k), 0, Math.PI * 2, true); g.fill('evenodd');
     g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 2 * u; g.beginPath(); g.arc(X(storm.tx), X(storm.tz), Math.max(0, storm.tr * k), 0, Math.PI * 2); g.stroke();
   }
+  for (const v of VEH) { // vehicles: a little red body, darker when someone's in it
+    g.save(); g.translate(X(v.x), X(v.z)); g.rotate(-v.yaw);
+    g.fillStyle = v.driver ? '#8a2a1e' : '#d6402c'; g.strokeStyle = '#1b1208'; g.lineWidth = 2 * u;
+    g.fillRect(-5 * u, -7 * u, 10 * u, 14 * u); g.strokeRect(-5 * u, -7 * u, 10 * u, 14 * u);
+    g.fillStyle = '#1b1208'; g.fillRect(-6.5 * u, 2 * u, 2.5 * u, 5 * u); g.fillRect(4 * u, 2 * u, 2.5 * u, 5 * u);
+    g.restore();
+  }
   drawPings(g, X, u);
   for (const e of squadmates()) { // your squad
     g.fillStyle = e === spec.who ? '#fff6e0' : '#5fd068'; g.strokeStyle = '#1b1208'; g.lineWidth = 2 * u;
@@ -317,7 +325,10 @@ function updateSquadHud() {
 }
 function updateBRHud() {
   const p = player, br = oneLife() && p.alive; let s = '';
-  if (br && p.drop) {
+  const nv = state === 'playing' && !p.vehicle ? nearVehicle(p) : null;
+  if (state === 'playing' && p.vehicle) s = `${keyName(binds.use)} · Get out`;
+  else if (nv) s = `${keyName(binds.use)} · Drive ${nv.k.name}`;
+  else if (br && p.drop) {
     const d = p.drop, t = flightT(), kj = keyName(binds.jump);
     if (d.stage === 'ride') s = t < FLIGHT.inStart ? 'Heading for the island…' : `${kj} · Jump (pushed out in ${Math.max(0, Math.ceil((FLIGHT.inEnd - t) * FLIGHT.dur))}s)`;
     else if (d.stage === 'fall') s = `${kj} · Open glider`;

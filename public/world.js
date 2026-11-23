@@ -3,7 +3,7 @@
 // and Spud Island (the battle royale map), which is 160 x 160.
 // HALF is how far from the center the playable ground reaches, for bots and spawns that pick random spots.
 import { R } from './config.js';
-import { world, boxes, SPAWNS, CHESTS, clearMap } from './kit.js';
+import { world, boxes, SPAWNS, CHESTS, VEHICLES, clearMap } from './kit.js';
 import depot from './maps/depot.js';
 import yard from './maps/yard.js';
 import dunes from './maps/dunes.js';
@@ -11,7 +11,7 @@ import frost from './maps/frost.js';
 import stack from './maps/stack.js';
 import highrise from './maps/highrise.js';
 import island from './maps/island.js';
-export { boxes, SPAWNS, STAIRS, PADS, PAD_R, ICE, CHESTS, boxGeo, LIMIT } from './kit.js';
+export { boxes, SPAWNS, STAIRS, PADS, PAD_R, ICE, CHESTS, VEHICLES, boxGeo, LIMIT } from './kit.js';
 
 export const MAPS = { depot: 'Depot', yard: 'Old Town', dunes: 'Dunes', frost: 'Frostbite', stack: 'Stackyard', highrise: 'Highrise', island: 'Spud Island' };
 const BUILD = { depot, yard, dunes, frost, stack, highrise, island };
@@ -29,6 +29,7 @@ export function loadMap(scene, name) {
   scene.fog = new THREE.Fog(m.sky, m.fog[0], m.fog[1]);
   for (const [x, z] of m.spawns) if (!boxes.some(b => b.min.y < 1 && x + R > b.min.x && x - R < b.max.x && z + R > b.min.z && z - R < b.max.z)) SPAWNS.push([x, z]);
   if (Array.isArray(m.chests)) CHESTS.push(...m.chests);
+  if (Array.isArray(m.vehicles)) VEHICLES.push(...m.vehicles);
   console.assert(SPAWNS.length >= 8, `map ${name} has only ${SPAWNS.length} clear spawns`);
   currentMap = name;
   return name;

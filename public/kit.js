@@ -3,6 +3,7 @@
 export const V3 = THREE.Vector3;
 export const rand = (a, b) => a + Math.random() * (b - a);
 
+export const VEHICLES = []; // [x, z, yaw, kind]: where the map parks its vehicles
 export const boxes = [];   // { min, max } solid boxes of the loaded map
 export const SPAWNS = [];  // [x, z] ground spawn points of the loaded map
 // every flight of stairs: { foot: [x, z], top: [x, z], y0, y1, via }. Bots and zombies use them to change floors;
@@ -167,5 +168,5 @@ export function tower(x, z, s, deckM, stepM, railM) {
 export function clearMap(scene) {
   scene.remove(world);
   world.traverse(o => { if (o.isMesh && o.geometry !== boxGeo) o.geometry.dispose(); });
-  world.clear(); boxes.length = 0; SPAWNS.length = 0; STAIRS.length = 0; PADS.length = 0; ICE.length = 0; CHESTS.length = 0;
+  world.clear(); boxes.length = 0; SPAWNS.length = 0; STAIRS.length = 0; PADS.length = 0; ICE.length = 0; CHESTS.length = 0; VEHICLES.length = 0;
 }

@@ -20,7 +20,7 @@ const wall = (axis, a, b, c, y, h, mat, gaps = [], t) => {
 // Ringed by sea cliffs. Six places worth landing at, with open fields, woods and lone huts between them:
 //   Spudville (north): a main street of roof-terrace houses, a plaza with a fountain and a ruined chapel.
 //   Radio Hill (centre): a two-level radio tower, the highest point you can stand on (8.5 m), and two bunkers.
-//   Mash Farm (west): a barn with a hayloft, a silo, a farmhouse and a field of hay bales.
+//   Mash Farm (west): a barn with a hayloft, a silo, a farmhouse, a field of hay bales and a tractor you can drive.
 //   Peel Fort (north-east): a walled stone plateau with a keep you can climb.
 //   Fry Port (south-east): stacked shipping containers, a warehouse, a crane and the docks.
 //   Tater Camp (south-west): cabins in the woods round two lookout towers.
@@ -47,7 +47,7 @@ export default function island() {
   };
   ground(T.grass());
   perimeter(M.cliff, 10, A);
-  const chests = [], spawns = [];
+  const chests = [], spawns = [], vehicles = [];
   const chest = (x, z, y = 0) => chests.push([x + OX, z + OZ, y]);
   const spawn = (...pts) => spawns.push(...pts.map(([x, z]) => [x + OX, z + OZ]));
   const deco = (x, z, w, d, h, y, m) => addBox(x, z, w, d, h, y, m, false);
@@ -164,7 +164,7 @@ export default function island() {
   wall('z', 18, 25, -44, 0, 1, M.wood, [], 0.15); wall('z', 28, 32, -26, 0, 1, M.wood, [], 0.15);
   for (const [x, z] of [[-40, 22], [-34, 25], [-30, 21], [-38, 28.5], [-30, 29]]) addBox(x, z, 1.6, 1.2, 1.2, 0, M.hay);
   chest(-35, 21.5);
-  addBox(-60, 8, 3, 1.8, 1.4, 0, M.red); addBox(-61, 8, 1.2, 1.6, 2.4, 0, M.red); // tractor
+  vehicles.push([-60 + OX, 8 + OZ, Math.PI / 2, 'tractor']); // parked by the barn wall, facing the open field west
   spawn([-50, 14], [-34, 0], [-60, -2], [-36, 14], [-52, 34]);
 
   // ---------- Peel Fort (north-east) ----------
@@ -254,5 +254,5 @@ export default function island() {
   // a beach strip along the cliff foot, for looks
   for (const [x, z, w, d] of [[0, -A + 1.2, 2 * A, 2.4], [0, A - 1.2, 2 * A, 2.4], [-A + 1.2, 0, 2.4, 2 * A], [A - 1.2, 0, 2.4, 2 * A]]) { const s = deco(x, z, w, d, 0.02, 0.01, M.sand); s.castShadow = false; }
 
-  return { sky: 0x9fd0ee, fog: [110, 320], spawns, chests, half: A - 6 };
+  return { sky: 0x9fd0ee, fog: [110, 320], spawns, chests, vehicles, half: A - 6 };
 }

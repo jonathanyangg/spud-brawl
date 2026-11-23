@@ -21,6 +21,7 @@ import {
   toast, toggleBigMap, updateHUD, updateProfile, updateScoreTop
 } from './hud.js';
 import { moveMapCursor, pingAim, pingMap, updatePings } from './ping.js';
+import { VEH, driveVehicle, enterVehicle, exitVehicle, nearVehicle, resetVehicles, updateVehicles } from './vehicles.js';
 
 const UP = new V3(0, 1, 0);
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -277,12 +278,12 @@ export function poseSoldier(e, dt) {
     u.tag.visible = ally || !versus(); // zombies and the range: everyone's on your side
     if (u.tag.material.depthTest === ally) { u.tag.material.depthTest = !ally; u.tag.renderOrder = ally ? 10 : 0; }
   }
-  const run = Math.min(1, sp / 6) * (1 - e.slideK), c = e.crouch * (1 - e.slideK), s = e.slideK;
+  const run = e.seated ? 0 : Math.min(1, sp / 6) * (1 - e.slideK), c = e.seated ? 1 : e.crouch * (1 - e.slideK), s = e.slideK;
   u.bob += dt * sp * 1.9;
   const ph = Math.floor(u.bob / Math.PI);
   if (ph !== u.stepPh) {
     u.stepPh = ph;
-    if (e !== player && sp > 2 && c < 0.5 && !e.drop && !e.zombie && e.alive !== false && state === 'playing') { const v = distVol(e.pos) * (sp > 6.5 ? 1 : 0.7); if (v > 0.08) sfx.step(v * 0.9); }
+    if (e !== player && sp > 2 && c < 0.5 && !e.seated && !e.drop && !e.zombie && e.alive !== false && state === 'playing') { const v = distVol(e.pos) * (sp > 6.5 ? 1 : 0.7); if (v > 0.08) sfx.step(v * 0.9); }
   }
   const sw = Math.sin(u.bob) * 0.7 * run * (1 - 0.5 * c);
   const hipY = HIP - 0.35 * c - 0.57 * s;
@@ -393,6 +394,7 @@ export function respawn(e) {
   e.hp = 100; e.alive = true; e.reloading = false; e.ammo = e.guns.map(w => w.mag); e.streak = 0;
   e.crouch = e.slideK = e.slide = 0; e.sprint = e.crouchOn = false;
   e.yaw = Math.atan2(e.pos.x, e.pos.z) + rand(-0.4, 0.4); e.pitch = 0; e.protectUntil = now + 1.5; e.lastHurt = -99;
+  if (e.vehicle) exitVehicle(e);
   e.res = { light: 0, shells: 0, heavy: 0, rockets: 0 }; e.heals = { bandage: 0, medkit: 0 }; e.frags = 0; e.useT = null; e.drop = null; e.landedAt = -99; e.hurtBy = null;
   if (e.isPlayer) endSpec();
   if (!e.isPlayer) {
@@ -623,7 +625,7 @@ const nadeMats = {
 };
 const nadeG = new THREE.SphereGeometry(0.15, 10, 8);
 export function throwNade(e) {
-  if (now < e.nadeReady || !e.alive || !nadesOn() || e.drop) return;
+  if (now < e.nadeReady || !e.alive || !nadesOn() || e.drop || e.vehicle) return;
   if (oneLife() && !(e.frags > 0)) { if (e.isPlayer) toast('No frags: find them in chests'); return; }
   const type = oneLife() ? 'frag' : THROWABLES[e.nade] ? e.nade : 'frag';
   e.nadeReady = now + (oneLife() ? FRAGS.cd : THROWABLES[type].cd);
@@ -1082,6 +1084,14 @@ function updatePlayer(dt) {
   if (wish.lengthSq() > 0) wish.normalize();
   if (p.drop) { zoomed = false; fireLatch = false; updateDrop(p, dt, wish); dropCamera(p, dt); return; }
   hideSelf();
+  if (p.vehicle) { // at the wheel: drive, look round, nothing else
+    zoomed = false; fireLatch = false; crouchTap = false;
+    driveVehicle(p, dt, f, s);
+    camera.position.set(p.pos.x, p.pos.y + EYE * poseK(p), p.pos.z);
+    camera.rotation.set(p.pitch, p.yaw, 0);
+    if (shake > 0 && !reduceMotion) camera.position.add(new V3(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(shake * 0.3));
+    return;
+  }
   const w = p.guns[p.weapon], firing = bound('shoot') || fireLatch;
   zoomed = bound('scope') && !p.reloading && w.kind !== 'melee';
 
@@ -1922,6 +1932,8 @@ export function nearGun(e) {
 export const knifeFull = p => p.guns.length >= MAX_SLOTS && p.guns[p.weapon].kind === 'melee';
 // E: open the chest in front of you, or trade the gun in your hands for the one at your feet
 function useKey(p) {
+  if (p.vehicle) return exitVehicle(p);
+  const v = nearVehicle(p); if (v) return enterVehicle(p, v);
   if (!oneLife()) return;
   const c = nearChest(p); if (c) return openChest(c.i, p);
   const it = nearGun(p); if (!it) return;
@@ -1984,7 +1996,7 @@ function pickHeal(e) {
 }
 const movingKeys = () => ['fwd', 'back', 'left', 'right', 'jump'].some(bound);
 export function startHeal(e, want) {
-  if (!oneLife() || e.useT || !e.alive || e.drop) return;
+  if (!oneLife() || e.useT || !e.alive || e.drop || e.vehicle) return;
   if (e.isPlayer && (movingKeys() || !e.onGround || Math.hypot(e.vel.x, e.vel.z) > 1.5)) { toast('Stand still to heal'); return; }
   if (want) { // the player asked for this one
     const H = HEALS[want];
@@ -2038,7 +2050,7 @@ function updateLoot(dt) {
 }
 export function resetBR() {
   brSeed = Math.random().toString(36).slice(2);
-  resetFlight(); resetLoot(); resetSupply(); resetStorm(); hideSelf();
+  resetFlight(); resetLoot(); resetSupply(); resetStorm(); resetVehicles(); hideSelf();
   MM.at = 0;
 }
 
@@ -2277,7 +2289,7 @@ function updateSnow(dt) {
 }
 export function setMap(name) {
   if (name === currentMap) return;
-  loadMap(scene, name);
+  loadMap(scene, name); resetVehicles();
   for (const n of nades) scene.remove(n.m); nades.length = 0;
   for (const pl of piles) scene.remove(pl.g); piles.length = 0;
 }
@@ -2681,7 +2693,7 @@ function tick(t) {
       if (e.useT && !e.remote) updateHeal(e);
     }
     if (mode === 'online') { updateRemotes(dt); updateRoster(); }
-    updateZombies(dt); updateAim(); updateStorm(dt); updateFlight(); updateSupply(dt); updateLoot(dt);
+    updateZombies(dt); updateAim(); updateStorm(dt); updateFlight(); updateSupply(dt); updateLoot(dt); updateVehicles(dt);
     updateNades(dt); updateParts(dt);
     for (const tr of tracers) if (tr.visible) { tr.userData.life -= dt; tr.material.opacity = tr.userData.life / 0.08; if (tr.userData.life <= 0) tr.visible = false; }
     for (const b of blasts) if (b.m.visible) { b.t += dt / 0.35; b.m.scale.setScalar(0.5 + b.t * 5.5); b.m.material.opacity = Math.max(0, 0.85 * (1 - b.t)); if (b.t >= 1) b.m.visible = false; }
@@ -2696,7 +2708,7 @@ function tick(t) {
 
   // view model
   const healing = state !== 'menu' && player.alive && !player.drop && !!player.useT;
-  const showVM = state !== 'menu' && state !== 'lobby' && player.alive && !player.drop && (healing || !(zoomed && camera.fov < 40));
+  const showVM = state !== 'menu' && state !== 'lobby' && player.alive && !player.drop && !player.vehicle && (healing || !(zoomed && camera.fov < 40));
   vm.root.visible = !healing; healVM.root.visible = healing;
   if (healing) poseHealVM(player.useT);
   if (showVM && !healing) {
@@ -2734,7 +2746,7 @@ function tick(t) {
   if (showVM) { renderer.clearDepth(); renderer.render(vmScene, vmCam); }
 }
 
-if (location.hostname === 'localhost') window.__spud = { step: n => { for (let i = 0; i < n; i++) tick(last + 50); }, player, net, ents, prog, Z, AIM, settings, tryFire, teamScore, storm,
+if (location.hostname === 'localhost') window.__spud = { step: n => { for (let i = 0; i < n; i++) tick(last + 50); }, VEH, keys, player, net, ents, prog, Z, AIM, settings, tryFire, teamScore, storm,
   CH, FLIGHT, useKey, startHeal, get LIMIT() { return LIMIT; },
   applyRemote: (id, s, seat) => applyRemote(id, s, seat), renderLobbyUI: () => renderLobbyUI(lobbyGroups()), enterLobby: () => enterLobby(),
   camAt: (x, y, z, tx, ty, tz) => { camHold = true; camera.position.set(x, y, z); camera.lookAt(tx, ty, tz); }, boxes, STAIRS, PADS, SPAWNS, startGame, toMenu: () => toMenu(), get game() { return game; }, get state() { return state; }, get now() { return now; },

@@ -46,7 +46,8 @@ pads (step on the glowing pad and it throws you up onto a ledge or roof).
 - **Highrise:** a city block: a parking garage, walk-ups with fire escapes, a plaza over an underpass, an elevated
   train line and an office tower.
 - **Spud Island:** a 240 m island for battle royale, ringed by sea cliffs: Spudville (houses, a chapel, a bell tower),
-  Radio Hill, Mash Farm (a barn with a loft and a silo), Peel Fort on a plateau, Fry Port (stacked containers, a crane,
+  Radio Hill, Mash Farm (a barn with a loft and a silo, and a red tractor anyone can drive:
+  walk up and press use to get in, steer with the movement keys, press use again to get out), Peel Fort on a plateau, Fry Port (stacked containers, a crane,
   a lighthouse) and Tater Camp, with woods, fields and lone huts between them.
 
 Bots and zombies find their way round walls on a ground grid (`public/nav.js`), change floors by the stairs and
