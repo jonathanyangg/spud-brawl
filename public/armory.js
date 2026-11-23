@@ -60,7 +60,7 @@ function render() {
   [...$('armTabs').children].forEach((b, i) => { b.setAttribute('aria-selected', String(i === tab)); b.tabIndex = i === tab ? 0 : -1; });
   $('armBody').setAttribute('aria-labelledby', 'armTab' + tab);
   // the preview: your soldier, and this tab's gun (your first weapon on the Loadout and Soldier tabs)
-  $('armPrevCap').textContent = showPreview($('armPrev'), tab >= 2 ? tab - 2 : prog.loadout[0]);
+  $('armPrevCap').textContent = showPreview($('armPrev'), tab >= 2 ? 'gun' : tab === 1 ? 'soldier' : 'loadout', tab >= 2 ? tab - 2 : prog.loadout[0]);
   const body = $('armBody'); body.textContent = '';
   const lv = level(prog);
   if (tab === 0) return renderLoadout(body, lv);
