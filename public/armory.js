@@ -5,6 +5,7 @@ import { EVENT, WEAPONS, THROWABLES, eventOn } from './config.js';
 import { EVENT_LOOKS, LOOKS, UNIFORMS, CAMOS, ATTACH, MAX_ATTACH, PREMIUM, premiumOf, level, uniformUnlocked, camoUnlocked, attachUnlocked, camoNeed, weaponUnlocked, throwableUnlocked } from './progress.js';
 import { lookSwatch } from './skins.js';
 import { shop } from './account.js';
+import { hidePreview, showPreview } from './armorypreview.js';
 
 const $ = id => document.getElementById(id);
 const TABS = ['Loadout', 'Soldier', ...WEAPONS.map(w => w.name)];
@@ -33,7 +34,7 @@ export function openArmory(fromMatch = false) {
   $('armMsg').textContent = '';
   render(); $('armory').hidden = false; $('armTab' + tab).focus();
 }
-export function closeArmory() { $('armory').hidden = true; closed(); }
+export function closeArmory() { $('armory').hidden = true; hidePreview(); closed(); }
 
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 // a look's chip and name, no behavior
@@ -58,6 +59,8 @@ function refocus(key) { const b = $('armBody').querySelector(`[data-key="${key}"
 function render() {
   [...$('armTabs').children].forEach((b, i) => { b.setAttribute('aria-selected', String(i === tab)); b.tabIndex = i === tab ? 0 : -1; });
   $('armBody').setAttribute('aria-labelledby', 'armTab' + tab);
+  // the preview: your soldier, and this tab's gun (your first weapon on the Loadout and Soldier tabs)
+  $('armPrevCap').textContent = showPreview($('armPrev'), tab >= 2 ? tab - 2 : prog.loadout[0]);
   const body = $('armBody'); body.textContent = '';
   const lv = level(prog);
   if (tab === 0) return renderLoadout(body, lv);

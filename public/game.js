@@ -891,6 +891,7 @@ const VM_BASE = new V3(0.2, -0.2, -0.5), VM_ADS = new V3(0, 0, -0.38); // ADS he
 vm.root.scale.setScalar(0.72);
 const curW = () => player.guns[player.weapon];
 const curVM = () => vm.guns[curW().id];
+export const vmGun = i => vm.guns[i]; // the Armory's preview borrows these
 export function refreshVM() { vm.guns.forEach((g, i) => g.visible = i === curW().id); }
 // dress the first-person guns: camo, uniform sleeves, attachment meshes
 export function dressVM() {

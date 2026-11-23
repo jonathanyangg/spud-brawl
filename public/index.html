@@ -331,7 +331,13 @@
     <div class="card" role="dialog" aria-modal="true" aria-labelledby="armTitle">
       <h2 id="armTitle">Armory</h2>
       <div class="seg" id="armTabs" role="tablist" aria-label="Armory sections"></div>
-      <div id="armBody" role="tabpanel"></div>
+      <div class="armMain">
+        <figure class="armPrev">
+          <canvas id="armPrev" aria-hidden="true"></canvas>
+          <figcaption id="armPrevCap" aria-live="polite"></figcaption>
+        </figure>
+        <div id="armBody" role="tabpanel"></div>
+      </div>
       <p class="help" id="armMsg" aria-live="polite"></p>
       <div class="actions">
         <button class="btn" id="armDone" type="button">Done</button>

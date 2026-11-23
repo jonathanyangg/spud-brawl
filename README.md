@@ -91,6 +91,7 @@ cdnjs; where that host is blocked, point `THREE_JS` at a local r128 `three.min.j
 - `public/progress.js`: XP, levels, unlock rules and attachment stats (pure logic, tested by `npm test`)
 - `public/skins.js`: camo patterns drawn on a canvas, used on soldiers, guns and Armory swatches
 - `public/armory.js`: the Armory screen (and the coin shop's looks when signed in)
+- `public/armorypreview.js`: the Armory's 3D preview of your soldier and the gun the open tab is about
 - `public/economy.js`: spin table, cooldown, coin packs, buy rules (pure logic, shared by server and client, tested)
 - `public/boards.js`: the leaderboards and the scores they accept (shared by server and client)
 - `public/account.js`: sign-in panel, coin balance, spin wheel, coin packs, cloud sync
@@ -115,7 +116,7 @@ Every kill earns XP (more for headshots, frags and streaks), and every finished 
 - **Camos** unlock per weapon from kills and headshots with it: Woodland, Desert, Urban, Tiger, Crimson, Gold (the RPG skips the headshot goals). Get Gold on any three weapons for Nebula.
 - **Attachments** unlock by level; equip up to two per gun: Extended mag (+50% mag, slower reload), Laser sight (tighter hip fire), Suppressor (quiet shots, no muzzle flash, less range), Fast mag (30% faster reload).
 
-Pick them in the **Armory** from the main menu. The menu shows your level, XP bar and how many unlocks you haven't looked at yet.
+Pick them in the **Armory** from the main menu. A preview beside the list shows your soldier in their uniform and the gun for the open tab, with its camo and attachments, and updates as you change them (drag it to turn it). The menu shows your level, XP bar and how many unlocks you haven't looked at yet.
 
 Progress is saved in this browser's localStorage (key `spudbrawl-progress`). Without an account, a different browser or device starts from level 1, and clearing site data resets it.
 

@@ -180,7 +180,14 @@ tr.me td{color:var(--butter)}
 .pxp .bar,#overXp .bar{margin-top:6px}
 #pXpBar,#overBar{height:100%;width:0;background:var(--butter);transition:width .6s}
 .newtag{font-family:var(--body);font-size:11px;font-weight:800;background:var(--ketchup);color:#fff;border-radius:10px;padding:2px 7px;margin-left:4px;vertical-align:2px}
-#armory .card{width:min(600px,100%);text-align:left;align-items:stretch;max-height:calc(100dvh - 32px);overflow:auto}
+#armory .card{width:min(920px,100%);text-align:left;align-items:stretch;max-height:calc(100dvh - 32px);overflow:auto}
+/* the preview stays in view while the list scrolls: a column on the left, or pinned above the list on narrow screens */
+.armMain{display:grid;grid-template-columns:minmax(240px,300px) 1fr;gap:16px;align-items:start}
+.armPrev{margin:0;position:sticky;top:0;z-index:1;display:grid;gap:4px;background:radial-gradient(ellipse at 50% 35%,#4a3a26,#22180d);border:1px solid var(--line);border-radius:10px;padding:6px}
+#armPrev{width:100%;height:min(400px,calc(100dvh - 200px));display:block;cursor:grab;touch-action:pan-y}
+#armPrev:active{cursor:grabbing}
+#armPrevCap{font-size:12px;color:var(--muted);text-align:center;min-height:1.4em}
+@media (max-width:720px){.armMain{grid-template-columns:1fr}.armPrev{top:-1px}#armPrev{height:190px}}
 #armory h2{text-align:center}
 #armTabs{justify-content:center}
 #armTabs button[aria-selected=true]{background:var(--cream);color:var(--ink);border-color:var(--cream)}
